@@ -1,4 +1,4 @@
-/** Shared domain enums / DTO stubs — expand in Phase 1+ */
+/** Shared domain types for Delivery Shield */
 
 export type UserRole = "driver" | "company_admin" | "platform_admin";
 
@@ -13,3 +13,8 @@ export type DeliveryPointStatus =
   | "in_progress"
   | "completed"
   | "failed";
+
+export type JobStatus = "draft" | "active" | "done";
+
+/** Carrier masked/virtual contact — never a dedicated raw customer MSISDN store */
+export type DeliveryContactType = "none" | "masked_number" | "virtual_number";

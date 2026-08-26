@@ -1,0 +1,135 @@
+{
+  "startedAt": "2026-08-26T11:52:45.214Z",
+  "steps": {
+    "pre_cleanup": {
+      "A": {
+        "ok": true,
+        "deletedCount": 0
+      },
+      "B": {
+        "ok": true,
+        "deletedCount": 0
+      }
+    },
+    "createUser": {
+      "ok": true,
+      "emailA": "whddud970607+e2e-driver-a@gmail.com",
+      "emailB": "whddud970607+e2e-driver-b@gmail.com",
+      "userIdA": "6eadce33-10ed-4d7b-a76a-84db7ba24ac0",
+      "userIdB": "73af69bb-8778-462a-8d52-88cacddb6553",
+      "metadataPurpose": "e2e_live_auth_rls"
+    },
+    "signIn": {
+      "ok": true,
+      "via": "anon_client"
+    },
+    "jwt_alg": {
+      "algA": "ES256",
+      "algB": "ES256"
+    },
+    "profiles_drivers": {
+      "A": {
+        "profileOk": true,
+        "role": "driver",
+        "driverOk": true,
+        "driverId": "ced412e2-4097-40e4-b613-85edc1247c5c",
+        "profileErr": null,
+        "driverErr": null
+      },
+      "B": {
+        "profileOk": true,
+        "role": "driver",
+        "driverOk": true,
+        "driverId": "fc6b1cbf-9dfb-4c46-8e9c-24b80311df42",
+        "profileErr": null,
+        "driverErr": null
+      }
+    },
+    "seed_jobs": {
+      "ok": true,
+      "jobIdA": "f758ed5b-fc78-4f52-834d-6d7adc3d9ac8",
+      "jobIdB": "9d9a25ca-7090-4fb2-8917-1d3af2d77613",
+      "pointIdA": "011934a6-a31f-4909-ace8-a7c0b763be43",
+      "pointIdB": "f2d3778d-a0ea-4ba3-a0de-bff3e68d4a3e",
+      "secretOk": true
+    },
+    "nest_start": {
+      "started": true,
+      "healthy": true
+    },
+    "nest_me": {
+      "A": {
+        "status": 200,
+        "role": "driver",
+        "hasDriver": true,
+        "userMatch": true
+      },
+      "B": {
+        "status": 200,
+        "role": "driver",
+        "hasDriver": true,
+        "userMatch": true
+      }
+    },
+    "nest_jobs": {
+      "A_own": {
+        "status": 200
+      },
+      "A_cross_B": {
+        "status": 403
+      },
+      "B_own": {
+        "status": 200
+      },
+      "B_cross_A": {
+        "status": 403
+      }
+    },
+    "anon_delivery_jobs": {
+      "errorCode": "42501",
+      "rowCount": 0,
+      "blocked": true
+    },
+    "access_secrets_authenticated": {
+      "errorCode": "42501",
+      "rowCount": 0,
+      "blocked": true
+    },
+    "rls_direct_jobs_as_A": {
+      "idsReturned": [
+        "f758ed5b-fc78-4f52-834d-6d7adc3d9ac8"
+      ],
+      "onlyOwn": true,
+      "errorCode": null
+    },
+    "cleanup": {
+      "secrets": {
+        "ok": true,
+        "error": null
+      },
+      "points": {
+        "ok": true,
+        "error": null
+      },
+      "jobs": {
+        "ok": true,
+        "error": null
+      },
+      "users": {
+        "usersDeleted": [
+          {
+            "id": "6eadce33-10ed-4d7b-a76a-84db7ba24ac0",
+            "ok": true,
+            "error": null
+          },
+          {
+            "id": "73af69bb-8778-462a-8d52-88cacddb6553",
+            "ok": true,
+            "error": null
+          }
+        ]
+      }
+    }
+  },
+  "finishedAt": "2026-08-26T11:52:50.272Z"
+}

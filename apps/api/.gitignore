@@ -3,3 +3,8 @@ dist
 .env
 .env*.local
 *.log
+
+# Local e2e secrets
+scripts/.e2e-passwords.json
+scripts/*-passwords.json
+

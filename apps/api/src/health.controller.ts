@@ -7,7 +7,7 @@ export class HealthController {
     return {
       status: "ok",
       service: "delivery-shield-api",
-      phase: 0,
+      phase: "1c",
     };
   }
 }

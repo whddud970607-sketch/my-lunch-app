@@ -1,0 +1,44 @@
+{
+  "checkedAt": "2026-08-26T11:51:11.530Z",
+  "findings": {
+    "env": {
+      "hasUrl": true,
+      "urlHost": "rjfkavkrqzdihyhmlhur.supabase.co",
+      "urlRef": "rjfkavkrqzdihyhmlhur",
+      "hasAnon": true,
+      "hasServiceRole": true,
+      "anonFingerprint": "9e341843",
+      "serviceFingerprint": "235bd304",
+      "anonMeta": {
+        "kind": "publishable_sb"
+      },
+      "serviceMeta": {
+        "kind": "secret_sb"
+      },
+      "sameProjectHint": "incomplete_jwt_claims"
+    },
+    "plannedEmails": {
+      "emailA": "whddud970607+e2e-driver-a@gmail.com",
+      "emailB": "whddud970607+e2e-driver-b@gmail.com"
+    },
+    "authUsers": {
+      "ok": true,
+      "totalListed": 0,
+      "A": {
+        "exists": false
+      },
+      "B": {
+        "exists": false
+      }
+    },
+    "signInProbe": {
+      "usedClient": "anon_from_env",
+      "emailUsed": "whddud970607+e2e-driver-a@gmail.com",
+      "errorName": "AuthApiError",
+      "errorMessage": "Invalid login credentials",
+      "errorCode": "invalid_credentials",
+      "status": 400,
+      "interpretation": "API_KEY_ACCEPTED_AUTH_REJECTED_LOGIN"
+    }
+  }
+}

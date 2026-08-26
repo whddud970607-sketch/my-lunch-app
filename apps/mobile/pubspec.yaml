@@ -1,0 +1,31 @@
+name: delivery_shield_mobile
+description: Delivery Shield driver mobile app (Phase 1D auth + session)
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.17.2
+  http: ^1.6.0
+  flutter_dotenv: ^6.0.1
+  kakao_maps_flutter: ^0.2.2
+  image_picker: ^1.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env.example
+    - .env
+    - assets/markers/delivery_pin.png
