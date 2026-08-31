@@ -92,6 +92,11 @@ class _SignupScreenState extends State<SignupScreen> {
                       '가입 시 기본 역할은 driver 입니다. platform_admin으로 승격할 수 없습니다.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Phase B: 가입 완료 시 본인인증 후 identity 프로필이 자동 생성됩니다.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                     const SizedBox(height: 20),
                     FilledButton(
                       onPressed: c.busy ? null : _submit,

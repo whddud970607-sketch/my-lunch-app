@@ -1,0 +1,35 @@
+{
+  "id": "single-map-device-verify-baseline",
+  "status": "baseline_recorded_not_final_approved",
+  "recordedAt": "2026-08-27T13:52:00+09:00",
+  "device": {
+    "serial": "R5KL3049JZN",
+    "model": "SM-S948N",
+    "abi": "arm64-v8a"
+  },
+  "scope": "single DeliveryPoint Kakao/Naver on-device verification",
+  "results": {
+    "connection": "pass",
+    "installPreserveData": "pass",
+    "naverMapLoadPinQtyPanelCloseRetap": "pass",
+    "naverCompletePhotoFlow": "skipped_already_completed_no_data_reset",
+    "mapProviderPersistNaver": "pass",
+    "kakaoRegressionSamePoint": "pass",
+    "kakaoCompletePhotoFlow": "skipped_already_completed_no_data_reset",
+    "perfSpotCheck": "pass_no_fatal"
+  },
+  "knownIssues": [
+    {
+      "id": "kakao-platformview-black-on-resume",
+      "severity": "Kakao Map PlatformView can show black surface after background/resume or am-start without remount",
+      "severity": "medium",
+      "fixApplied": false,
+      "retestInNamdong10": true
+    }
+  ],
+  "notes": [
+    "Pin digit is totalQuantity, not routeOrder",
+    "geocodeProvider remains kakao even when mapProvider is naver",
+    "Final product approval deferred by product owner"
+  ]
+}

@@ -1,0 +1,88 @@
+.main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+
+.header {
+  margin-bottom: 2rem;
+}
+
+.title {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.lead {
+  margin: 0;
+  color: #5a6472;
+  line-height: 1.5;
+}
+
+.panel {
+  border: 1px solid #dbe1ea;
+  border-radius: 12px;
+  padding: 1.25rem;
+  background: #fff;
+  margin-bottom: 1.25rem;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.input {
+  border: 1px solid #c9d2df;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.button {
+  margin-top: 1rem;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  background: #0f6b4c;
+  color: #fff;
+  cursor: pointer;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid #e7ebf1;
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+}
+
+.empty {
+  color: #5a6472;
+  padding: 1rem 0;
+}
+
+.note {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #5a6472;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: #0f6b4c;
+  text-decoration: none;
+}

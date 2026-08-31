@@ -1,18 +1,37 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// App configuration. Publishable/anon + Kakao native only — never service_role/REST secret.
+/// App configuration. Publishable/anon + map native keys only — never service_role/REST secret.
 class AppConfig {
   AppConfig._({
     required this.supabaseUrl,
     required this.supabaseAnonKey,
     required this.apiBaseUrl,
     required this.kakaoNativeAppKey,
+    required this.naverMapClientId,
+    required this.completeViaSyncQueue,
+    required this.todayServiceDateOverride,
+    required this.workdayExecutionSessionV1,
   });
 
   final String supabaseUrl;
   final String supabaseAnonKey;
   final String apiBaseUrl;
   final String kakaoNativeAppKey;
+
+  /// Optional. When null/empty, Naver map stays feature-gated (no init, no crash).
+  final String? naverMapClientId;
+
+  /// Feature flag: when true, Complete uses Operation Queue (Phase 2).
+  /// Default false — existing map-spike complete path unchanged.
+  final bool completeViaSyncQueue;
+
+  /// Debug/test only: pass explicit `?date=` to GET /delivery/today.
+  /// Never invent a fixture-date fallback when unset (production uses server Seoul date).
+  final String? todayServiceDateOverride;
+
+  /// B3: job-neutral execution Session per Workday (mirrors server
+  /// WORKDAY_EXECUTION_SESSION_V1). Default false — B2 picker path unchanged.
+  final bool workdayExecutionSessionV1;
 
   static late AppConfig instance;
 
@@ -27,6 +46,19 @@ class AppConfig {
     final anon = (dotenv.env['SUPABASE_ANON_KEY'] ?? '').trim();
     final api = (dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:4000/v1').trim();
     final kakaoNative = (dotenv.env['KAKAO_NATIVE_APP_KEY'] ?? '').trim();
+    final naverClient = (dotenv.env['NAVER_MAP_CLIENT_ID'] ?? '').trim();
+    final syncCompleteRaw =
+        (dotenv.env['COMPLETE_VIA_SYNC_QUEUE'] ?? 'false').trim().toLowerCase();
+    final completeViaSyncQueue =
+        syncCompleteRaw == '1' || syncCompleteRaw == 'true' || syncCompleteRaw == 'yes';
+    final todayOverride =
+        (dotenv.env['TODAY_SERVICE_DATE'] ?? '').trim();
+    final executionRaw = (dotenv.env['WORKDAY_EXECUTION_SESSION_V1'] ?? 'false')
+        .trim()
+        .toLowerCase();
+    final workdayExecutionSessionV1 = executionRaw == '1' ||
+        executionRaw == 'true' ||
+        executionRaw == 'yes';
 
     if (url.isEmpty) {
       throw StateError('SUPABASE_URL is missing in .env');
@@ -59,6 +91,11 @@ class AppConfig {
       supabaseAnonKey: anon,
       apiBaseUrl: api.replaceAll(RegExp(r'/$'), ''),
       kakaoNativeAppKey: kakaoNative,
+      naverMapClientId: naverClient.isEmpty ? null : naverClient,
+      completeViaSyncQueue: completeViaSyncQueue,
+      todayServiceDateOverride:
+          todayOverride.isEmpty ? null : todayOverride,
+      workdayExecutionSessionV1: workdayExecutionSessionV1,
     );
   }
 }

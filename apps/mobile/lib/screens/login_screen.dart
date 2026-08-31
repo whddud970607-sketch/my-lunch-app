@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/auth_controller.dart';
+import 'password_recovery_screen.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -102,6 +103,41 @@ class _LoginScreenState extends State<LoginScreen> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Text('로그인'),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: c.busy
+                                  ? null
+                                  : () {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('아이디 찾기는 준비 중입니다.'),
+                                        ),
+                                      );
+                                    },
+                              child: const Text('아이디 찾기'),
+                            ),
+                          ),
+                          Expanded(
+                            child: TextButton(
+                              onPressed: c.busy
+                                  ? null
+                                  : () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) => PasswordRecoveryScreen(
+                                            controller: c,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                              child: const Text('비밀번호 찾기'),
+                            ),
+                          ),
+                        ],
                       ),
                       TextButton(
                         onPressed: c.busy

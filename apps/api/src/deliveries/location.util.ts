@@ -104,3 +104,27 @@ export function mapPointStatusLabel(status: string): string {
       return status;
   }
 }
+
+export function mapShipmentStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "대기";
+    case "scanned":
+      return "스캔됨";
+    case "completed":
+      return "완료";
+    case "failed":
+      return "실패";
+    default:
+      return status;
+  }
+}
+
+/** Camera / list grouping for test fixtures (not map SDK provider). */
+export function fixtureGroupFromKey(key: string | null | undefined): string {
+  const k = key ?? "";
+  if (k.startsWith("fixture:namdong10-sim:")) return "namdong10-sim";
+  if (k.startsWith("fixture:seoul-parc1-sim:")) return "seoul-parc1-sim";
+  if (k === "phase1-map-spike-kakao") return "spike";
+  return "other";
+}

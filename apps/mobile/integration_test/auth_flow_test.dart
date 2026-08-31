@@ -1,9 +1,16 @@
 import 'package:delivery_shield_mobile/config/app_config.dart';
+import 'package:delivery_shield_mobile/location/driver_location_service.dart';
 import 'package:delivery_shield_mobile/main.dart';
 import 'package:delivery_shield_mobile/services/api_client.dart';
 import 'package:delivery_shield_mobile/services/auth_service.dart';
+import 'package:delivery_shield_mobile/services/delivery_session_service.dart';
+import 'package:delivery_shield_mobile/services/delivery_workday_repository.dart';
 import 'package:delivery_shield_mobile/services/me_service.dart';
 import 'package:delivery_shield_mobile/state/auth_controller.dart';
+import 'package:delivery_shield_mobile/state/delivery_session_controller.dart';
+import 'package:delivery_shield_mobile/sync/completion_enqueue_service.dart';
+import 'package:delivery_shield_mobile/sync/completion_projection_store.dart';
+import 'package:delivery_shield_mobile/sync/operation_sync_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -41,13 +48,34 @@ void main() {
     expect(controller.me!.driver, isNotNull);
     expect(controller.me!.role, 'driver');
 
-    await tester.pumpWidget(DeliveryShieldApp(controller: controller));
+    final sessionController = DeliverySessionController(
+      sessionService: DeliverySessionService(api),
+      workdayRepository: DeliveryWorkdayRepository(api),
+      locationService: DriverLocationService(),
+    );
+    final syncEngine = OperationSyncEngine();
+    final projections = CompletionProjectionStore();
+    final enqueue = CompletionEnqueueService(
+      syncEngine: syncEngine,
+      projections: projections,
+    );
+
+    await tester.pumpWidget(
+      DeliveryShieldApp(
+        controller: controller,
+        sessionController: sessionController,
+        syncEngine: syncEngine,
+        projections: projections,
+        completionEnqueue: enqueue,
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('기사 홈'), findsOneWidget);
     expect(find.textContaining('role: driver'), findsOneWidget);
     expect(auth.currentSession, isNotNull);
 
+    await sessionController.onSignOut();
     await controller.signOut();
     await tester.pumpAndSettle();
     expect(controller.state, AuthViewState.signedOut);

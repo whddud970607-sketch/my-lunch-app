@@ -1,0 +1,7 @@
+/**
+ * DISABLED — Phase A account recovery policy.
+ * This script must never reset fixture driver passwords or write credential files.
+ * Use the in-app password recovery flow instead.
+ */
+console.error("DISABLED: prep-device-driver-login.mjs is no longer allowed to run.");
+process.exit(1);

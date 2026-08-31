@@ -20,6 +20,7 @@ export type MapSpikePointRow = {
   pin_accuracy: string;
   location: unknown;
   pii_masked_at: string | null;
+  tracking_or_order_key: string | null;
 };
 
 export type MapSpikePiiRow = {
@@ -27,6 +28,19 @@ export type MapSpikePiiRow = {
   customer_name: string | null;
   raw_address: string | null;
   detail_address: string | null;
+  delivery_memo: string | null;
+  contact_type: string | null;
+  contact_value: string | null;
+};
+
+export type DeliveryShipmentRow = {
+  id: string;
+  point_id: string;
+  sequence_no: number;
+  tracking_code: string;
+  status: string;
+  scanned_at: string | null;
+  completed_at: string | null;
 };
 
 @Injectable()
@@ -57,7 +71,7 @@ export class DeliveriesRepository {
     const { data, error } = await userClient
       .from("delivery_points")
       .select(
-        "id, job_id, driver_id, display_label, carrier_code, quantity, status, pin_accuracy, location, pii_masked_at",
+        "id, job_id, driver_id, display_label, carrier_code, quantity, status, pin_accuracy, location, pii_masked_at, tracking_or_order_key",
       )
       .eq("driver_id", driverId)
       .eq("tracking_or_order_key", "phase1-map-spike-kakao")
@@ -70,13 +84,97 @@ export class DeliveriesRepository {
     return (data as MapSpikePointRow[]) ?? [];
   }
 
+  /**
+   * Test-only: namdong10 + seoul-parc1 fixture points (RLS + driver_id).
+   * Keys: fixture:namdong10-sim:% | fixture:seoul-parc1-sim:%
+   */
+  async listNamdong10FixturePoints(
+    userClient: SupabaseClient,
+    driverId: string,
+  ): Promise<MapSpikePointRow[]> {
+    const { data, error } = await userClient
+      .from("delivery_points")
+      .select(
+        "id, job_id, driver_id, display_label, carrier_code, quantity, status, pin_accuracy, location, pii_masked_at, tracking_or_order_key",
+      )
+      .eq("driver_id", driverId)
+      .or(
+        "tracking_or_order_key.like.fixture:namdong10-sim:%,tracking_or_order_key.like.fixture:seoul-parc1-sim:%",
+      )
+      .order("sequence_no", { ascending: true });
+
+    if (error) {
+      this.logger.warn(`delivery_points fixture list failed code=${error.code}`);
+      return [];
+    }
+    return (data as MapSpikePointRow[]) ?? [];
+  }
+
+  /** Owned point lookup for pin adjust / complete (spike or fixture). */
+  async findPointForDriver(
+    userClient: SupabaseClient,
+    driverId: string,
+    pointId: string,
+  ): Promise<MapSpikePointRow | null> {
+    const { data, error } = await userClient
+      .from("delivery_points")
+      .select(
+        "id, job_id, driver_id, display_label, carrier_code, quantity, status, pin_accuracy, location, pii_masked_at, tracking_or_order_key",
+      )
+      .eq("driver_id", driverId)
+      .eq("id", pointId)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(`delivery_points by id failed code=${error.code}`);
+      return null;
+    }
+    return (data as MapSpikePointRow | null) ?? null;
+  }
+
+  /** Batch owned point lookup for access capability (RLS-scoped). */
+  async listPointsForDriverByIds(
+    userClient: SupabaseClient,
+    driverId: string,
+    pointIds: string[],
+  ): Promise<
+    Array<{
+      id: string;
+      job_id: string;
+      driver_id: string;
+      status: string;
+      pii_masked_at: string | null;
+    }>
+  > {
+    if (!pointIds.length) return [];
+    const { data, error } = await userClient
+      .from("delivery_points")
+      .select("id, job_id, driver_id, status, pii_masked_at")
+      .eq("driver_id", driverId)
+      .in("id", pointIds);
+
+    if (error) {
+      this.logger.warn(`delivery_points batch by ids failed code=${error.code}`);
+      return [];
+    }
+    return (data ?? []) as Array<{
+      id: string;
+      job_id: string;
+      driver_id: string;
+      status: string;
+      pii_masked_at: string | null;
+    }>;
+  }
+
   async findMapSpikePii(
     userClient: SupabaseClient,
     pointId: string,
   ): Promise<MapSpikePiiRow | null> {
     const { data, error } = await userClient
       .from("delivery_point_pii")
-      .select("point_id, customer_name, raw_address, detail_address")
+      .select(
+        "point_id, customer_name, raw_address, detail_address, delivery_memo, contact_type, contact_value",
+      )
       .eq("point_id", pointId)
       .maybeSingle();
 
@@ -85,6 +183,45 @@ export class DeliveriesRepository {
       return null;
     }
     return (data as MapSpikePiiRow | null) ?? null;
+  }
+
+  async findMapSpikePiiBatch(
+    userClient: SupabaseClient,
+    pointIds: string[],
+  ): Promise<MapSpikePiiRow[]> {
+    if (!pointIds.length) return [];
+    const { data, error } = await userClient
+      .from("delivery_point_pii")
+      .select(
+        "point_id, customer_name, raw_address, detail_address, delivery_memo, contact_type, contact_value",
+      )
+      .in("point_id", pointIds);
+
+    if (error) {
+      this.logger.warn(`delivery_point_pii batch failed code=${error.code}`);
+      return [];
+    }
+    return (data as MapSpikePiiRow[]) ?? [];
+  }
+
+  async listShipmentsForPoints(
+    userClient: SupabaseClient,
+    pointIds: string[],
+  ): Promise<DeliveryShipmentRow[]> {
+    if (!pointIds.length) return [];
+    const { data, error } = await userClient
+      .from("delivery_shipments")
+      .select(
+        "id, point_id, sequence_no, tracking_code, status, scanned_at, completed_at",
+      )
+      .in("point_id", pointIds)
+      .order("sequence_no", { ascending: true });
+
+    if (error) {
+      this.logger.warn(`delivery_shipments list failed code=${error.code}`);
+      return [];
+    }
+    return (data as DeliveryShipmentRow[]) ?? [];
   }
 
   async updateMapSpikePin(

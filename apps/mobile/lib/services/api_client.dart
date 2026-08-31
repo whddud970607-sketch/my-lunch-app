@@ -108,8 +108,24 @@ class ApiClient {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final msg = (body['message'] as String?) ?? 'Request failed';
-      throw ApiException(message: msg, statusCode: response.statusCode);
+      final rawMsg = body['message'];
+      String msg = 'Request failed';
+      Map<String, dynamic>? nested;
+      if (rawMsg is String) {
+        msg = rawMsg;
+      } else if (rawMsg is Map<String, dynamic>) {
+        nested = rawMsg;
+        msg = (rawMsg['message'] as String?) ?? msg;
+      } else if (rawMsg is List && rawMsg.isNotEmpty) {
+        msg = rawMsg.first.toString();
+      } else if (body['error'] is String) {
+        msg = body['error'] as String;
+      }
+      throw ApiException(
+        message: msg,
+        statusCode: response.statusCode,
+        body: nested ?? body,
+      );
     }
 
     return body;

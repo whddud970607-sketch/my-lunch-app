@@ -1,0 +1,101 @@
+{
+  "httpStatus": 200,
+  "matchedAddress": "서울 영등포구 여의대로 108",
+  "roadAddress": "서울 영등포구 여의대로 108",
+  "latitude": 37.5252014942155,
+  "longitude": 126.929108448093,
+  "buildingNameFromAddress": "파크원",
+  "addressType": "ROAD_ADDR",
+  "keywordHttpStatus": 200,
+  "keywordPlaces": [
+    {
+      "placeName": "파크원타워1",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52671377331284,
+      "longitude": 126.92724388048966,
+      "category": "부동산 > 빌딩"
+    },
+    {
+      "placeName": "파크원타워2",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52702497417115,
+      "longitude": 126.92782280580694,
+      "category": "부동산 > 빌딩"
+    },
+    {
+      "placeName": "파크원연세마디의원",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52670007813373,
+      "longitude": 126.92695201866937,
+      "category": "의료,건강 > 병원 > 정형외과"
+    },
+    {
+      "placeName": "에스비케이타워",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.5251913156818,
+      "longitude": 126.929113095956,
+      "category": "금융,보험 > 금융서비스"
+    },
+    {
+      "placeName": "NH농협은행 NH금융PLUS 파크원센터",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52709763538872,
+      "longitude": 126.92730120422932,
+      "category": "금융,보험 > 금융서비스 > 은행 > NH농협은행"
+    },
+    {
+      "placeName": "매머드익스프레스 파크원타워1점",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52668216643331,
+      "longitude": 126.9271273874252,
+      "category": "음식점 > 카페 > 커피전문점 > 매머드익스프레스"
+    },
+    {
+      "placeName": "스파크플러스 라운지 여의도파크원",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.5251913156818,
+      "longitude": 126.929113095956,
+      "category": "서비스,산업 > 전문대행 > 공간대여 > 공유오피스"
+    },
+    {
+      "placeName": "스플라운지 여의도파크원",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.5251877123612,
+      "longitude": 126.929114230642,
+      "category": "서비스,산업 > 전문대행 > 공간대여 > 공유오피스"
+    },
+    {
+      "placeName": "NH투자증권 NH금융PLUS 영업부금융센터",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.52719617132445,
+      "longitude": 126.92783395392442,
+      "category": "금융,보험 > 금융서비스 > 증권 > NH투자증권"
+    },
+    {
+      "placeName": "NH투자증권 디지털고객관리센터",
+      "addressName": "서울 영등포구 여의도동 22",
+      "roadAddressName": "서울 영등포구 여의대로 108",
+      "latitude": 37.527153809048144,
+      "longitude": 126.92780910600717,
+      "category": "금융,보험 > 금융서비스 > 증권 > NH투자증권"
+    }
+  ],
+  "resolveHelper": {
+    "latitude": 37.5252014942155,
+    "longitude": 126.929108448093,
+    "addressName": "서울 영등포구 여의대로 108",
+    "buildingName": "파크원",
+    "placeName": null,
+    "geocodeSource": "address",
+    "pinAccuracy": "building"
+  }
+}
