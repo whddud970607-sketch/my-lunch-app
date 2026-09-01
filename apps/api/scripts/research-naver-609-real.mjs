@@ -8,14 +8,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const GEOCODE_URL = "https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode";
-const REVERSE_URL =
-  "https://naveropenapi.apigw.ntruss.com/map-reversegeocode/v2/gc";
+const GEOCODE_URL = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode";
+const REVERSE_URL = "https://maps.apigw.ntruss.com/map-reversegeocode/v2/gc";
 
 const QUERIES = [
   "인천광역시 남동구 서창남순환로 190-100",
-  "에코에비뉴",
-  "에코에비뉴 609동",
+  "인천광역시 남동구 에코에비뉴",
+  "인천광역시 남동구 에코에비뉴 609동",
   "인천광역시 남동구 서창남순환로 190-100 609동",
 ];
 

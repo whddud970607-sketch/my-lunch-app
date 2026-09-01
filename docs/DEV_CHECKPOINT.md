@@ -412,3 +412,171 @@ Scripts: `research-naver-609-real.mjs`, `research-naver-directions-609.mjs`
 ### Stopped intentionally (2026-08-31)
 
 No further feature work, API live calls, migrations APPLY, or device tests after this checkpoint + local backup.
+
+---
+
+## Progress Snapshot — 2026-09-01 (KST)
+
+**Saved:** 2026-09-01 evening  
+**Purpose:** End-of-day checkpoint — PUBLIC 609 provider research (NAVER / 건축HUB / VWorld prep). Local commit + tag + physical backup. **No push.**  
+**Secrets:** No keys/tokens/credentials in this file. `.env` never committed.
+
+### A. PUBLIC 609 benchmark (no PII)
+
+| Field | Value |
+|-------|--------|
+| Region | 인천광역시 남동구 |
+| Jibun | 서창동 695 |
+| Road | 서창남순환로 190-100 |
+| Complex | 에코에비뉴 |
+| Dong | 609동 |
+
+### B. Kakao 609 (prior evidence — unchanged)
+
+| Item | Status |
+|------|--------|
+| KAKAO_609_PLACE_EVIDENCE | **PASS** — query `에코에비뉴 609동` → `에코에비뉴아파트 609동` |
+| KAKAO_609_CLASSIFICATION | **BUILDING_CANDIDATE** (place evidence; not geometry verified) |
+| Reference coords | lat 37.423283, lng 126.741867 |
+
+### C. NAVER 609 LIVE (research-only)
+
+| Item | Status |
+|------|--------|
+| NAVER_AUTH | **PASS** (after research script host fix to `maps.apigw.ntruss.com`) |
+| Initial blocker | HTTP 401 on legacy `naveropenapi.apigw.ntruss.com` → **NOT_VERIFIED_AUTH_BLOCKED** (not address quality failure) |
+| NAVER_GEOCODING_LIVE | **PASS** (HTTP 200 / status OK) |
+| NAVER_REVERSE_GEOCODING_LIVE | **PASS** (1 call on first valid coordinate) |
+
+**Forward geocoding (approved 4 queries):**
+
+| Query | RESULT_COUNT | Classification |
+|-------|--------------|----------------|
+| A road-only (`서창남순환로 190-100`) | 1 | **COMPLEX_REPRESENTATIVE** — `BUILDING_NAME` = 에코 에비뉴 |
+| B complex (`에코에비뉴`) | 0 | **NO_RESULT** |
+| C complex+dong (`에코에비뉴 609동`) | 0 | **NO_RESULT** |
+| D road+dong (`서창남순환로 190-100 609동`) | 1 | **COMPLEX_REPRESENTATIVE** — same as A; 609동 ignored |
+
+| Item | Status |
+|------|--------|
+| EXACT_609_STRUCTURED_FORWARD_EVIDENCE | **NO** |
+| EXACT_609_TEXT_FORWARD_EVIDENCE | **NO** |
+| NAVER_EXACT_DONG_CAPABILITY | **COMPLEX_ONLY** |
+| Kakao vs NAVER complex-rep distance | ~111 m (not accuracy evidence) |
+
+**Verdict:** NAVER confirms **complex representative** level only. **No exact 609-dong evidence** from NAVER Geocoding/Reverse. Do **not** promote coordinate return to pin verified.
+
+**Research script change (today):** `research-naver-609-real.mjs` — host `maps.apigw.ntruss.com`; approved PUBLIC query strings for B/C. Production `naver-geocode.adapter.ts` still on legacy host — **not changed** (separate approval).
+
+### D. BuildingHUB 609 Identity (research-only)
+
+| Item | Status |
+|------|--------|
+| BUILDING_HUB_AUTH | **PASS** |
+| BUILDING_HUB_LIVE | **PASS** |
+| RESULT_CODE | **00** |
+| KEY_TRANSPORT | **DECODE_ONCE** (`decodeURIComponent` once before `URLSearchParams`; `.env` stores encoding form) |
+| EXACT_609_REGISTER_OBJECT_FOUND | **YES** |
+| DONG_NM | **609동** |
+| BLD_NM | **에코 에비뉴** |
+| PLAT_PLC | 인천광역시 남동구 서창동 695번지 |
+| NEW_PLAT_PLC | 인천광역시 남동구 서창남순환로 190-100 (서창동) |
+| DONG_MATCH | **YES** |
+| COMPLEX_MATCH | **YES** |
+| ADDRESS_MATCH | **YES** |
+| DISTINCT_DONG_COUNT (parcel) | **19** (609 is individual register object, not complex-only label) |
+| BUILDING_IDENTITY_VERIFIED | **YES** |
+
+**Parcel context (Kakao-derived seed, not identity evidence):** sigunguCd 28200, bjdongCd 10500, platGbCd 0, bun 0695, ji 0000
+
+**Not logged:** `mgmBldrgstPk` values (presence only: YES)
+
+### E. VWorld (prep + official doc research)
+
+| Item | Status |
+|------|--------|
+| VWORLD_API_KEY | **CONFIGURED** (local `.env` only) |
+| VWORLD_DOMAIN | **NOT_CONFIGURED** in `.env` |
+| Operating key application | **NOT requested** (development key only) |
+| VWorld GetCapabilities LIVE (domain-safe gate) | **NOT_RUN** — blocked when `VWORLD_DOMAIN` missing; no `localhost` fallback |
+| VWorld DescribeFeatureType LIVE | **NOT_RUN** |
+| VWorld GetFeature / 609 geometry | **NOT_RUN** |
+
+**Official vworld.kr public documentation (no live API this step):**
+
+| Topic | Finding |
+|-------|---------|
+| WFS `key` param | **발급받은 api key** / **인증키** |
+| WFS `domain` param | **O/1 optional** — “API KEY를 발급받을때 입력했던 URL”; required for non-webviewer browser use per guide |
+| `INCORRECT_KEY` | Mismatch with domain registered at key issuance |
+| 개발키 vs 운영키 | **UNKNOWN** in public API reference (login-gated issuance UI) |
+| `localhost` arbitrary default | **NOT supported** by official docs — do not assume |
+| WFS GetCapabilities | **Listed** in official WFS request ops |
+| DescribeFeatureType | **Not listed** in official WFS request table (UNKNOWN support from docs alone) |
+
+**Prior exploratory live call note:** One schema probe succeeded with implicit `localhost` before domain-safety rule was enforced — **not** adopted as configuration policy.
+
+### F. Geometry / Pin trust (strict — do not upgrade)
+
+| Item | Status |
+|------|--------|
+| BUILDING_GEOMETRY_VERIFIED | **NO** |
+| BUILDING_CENTER_VERIFIED | **NO** |
+| PIN_VERIFIED | **NO** |
+| REAL_609_PIN_READY | **NO** |
+
+### G. Credential inventory (presence only — no values)
+
+| Variable | Status |
+|----------|--------|
+| KAKAO_REST_API_KEY | CONFIGURED |
+| NAVER_MAP_CLIENT_ID / SECRET | CONFIGURED |
+| DATA_GO_KR_SERVICE_KEY | CONFIGURED |
+| VWORLD_API_KEY | CONFIGURED |
+| VWORLD_DOMAIN | NOT_CONFIGURED |
+
+### H. Core Completion Gate (unchanged order)
+
+1. **Building / Dong Coordinate Resolution** ← **CURRENT ACTIVE** (identity partial; geometry pending)
+2. Exception Engine  
+3. Import C3/C4  
+4. Offline Delivery/POD E2E  
+5. Route Optimization Engine  
+6. Delivery Window + ETA + SLA  
+7. Dynamic Route Replanning  
+8. Arrival Detection  
+9. Scanner/OCR  
+10. Building Access Intelligence  
+11. Notification Engine  
+12. Admin real-time control tower  
+13. Operations reporting/analytics  
+
+### I. Next session start point
+
+**VWorld 609 Geometry Gate (after console verification)**
+
+1. VWorld 콘솔 → 인증키 관리: 서비스유형(APP), 등록 URL/domain, 키 유형(개발) 확인  
+2. Set `VWORLD_DOMAIN` in local `.env` to **match console registration** (no arbitrary `localhost`)  
+3. Official WFS schema gate: GetCapabilities + DescribeFeatureType (if applicable)  
+4. Attribute-based GetFeature for 609동 (`buld_nm_dc` + `buld_nm`) — **no proximity/nearest-polygon guess**  
+5. After polygon evidence: representative point comparison (centroid vs point-on-surface)  
+6. Fuse verified delivery coordinate as navigation single source of truth (future gate; not production yet)
+
+**Also pending (not started):**
+
+- Production `naver-geocode.adapter.ts` host update (separate approval after NAVER live evidence)  
+- 건축HUB `research-building-register-609.mjs` DECODE_ONCE transport in script (if reused for filesystem runs)  
+- NAVER Directions 5/15 live (out of scope today)
+
+### J. Files touched today (research only)
+
+| File | Change |
+|------|--------|
+| `apps/api/scripts/research-naver-609-real.mjs` | Host fix + approved B/C query strings |
+| `docs/DEV_CHECKPOINT.md` | This snapshot |
+
+**Not changed:** production adapters, Flutter, Nest, DB, navigation, AddressCanonicalizationService.
+
+### Stopped intentionally (2026-09-01)
+
+No production wiring, no new live API calls, no operating-key application, no geometry/pin promotion after this checkpoint + backup.
