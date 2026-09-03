@@ -17,6 +17,8 @@ android {
 
     buildFeatures {
         viewBinding = true
+        // Required by tmap-ui-sdk (official sample enables dataBinding).
+        dataBinding = true
         buildConfig = true
     }
 
@@ -49,6 +51,10 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
+    // TMAP Navi UI SDK V1.77 package → artifact 1.0.0.0158 (debug PoC only).
+    implementation("com.tmapmobility.tmap:tmap-ui-sdk:1.0.0.0158")
+    // Align with official Kotlin sample pin (TMAP POM declares 21.0.1).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }
 
 flutter {

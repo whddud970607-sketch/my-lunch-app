@@ -13,6 +13,9 @@ export function scoreCandidateConfidence(
   if (candidate.coordinateType === "BUILDING_CANDIDATE" && candidate.resolvedDong) {
     score += 0.08;
   }
+  if (candidate.coordinateType === "BUILDING_CENTER") {
+    score = Math.max(score, 0.95);
+  }
   if (candidate.coordinateType === "COMPLEX_REPRESENTATIVE" && opts.requiresDong) {
     score -= 0.25;
   }
@@ -34,7 +37,8 @@ export function mapCoordinateTypeToPinQuality(
   if (
     coordinateType === "BUILDING_ENTRANCE_VERIFIED" ||
     coordinateType === "VEHICLE_ACCESS_VERIFIED" ||
-    coordinateType === "BUILDING_VERIFIED"
+    coordinateType === "BUILDING_VERIFIED" ||
+    coordinateType === "BUILDING_CENTER"
   ) {
     return "VERIFIED";
   }

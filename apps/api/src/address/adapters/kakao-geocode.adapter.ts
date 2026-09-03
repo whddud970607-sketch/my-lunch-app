@@ -82,6 +82,8 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
             confidence: 0.82,
             evidence: [
               "kakao_keyword_apartment_dong",
+              "LOW_QUALITY_CANDIDATE_EVIDENCE",
+              "NOT_BUILDING_IDENTITY_AUTHORITY",
               `place=${dongPlace.place_name ?? "unknown"}`,
             ],
             resolvedDong: dong,

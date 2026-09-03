@@ -82,6 +82,7 @@ function baseDraft(
     addressRaw: "Addr",
     addressNormalized: "Addr",
     detailAddress: null,
+    complexName: null,
     deliveryMemo: null,
     displayLabel: null,
     barcodeRaw: null,

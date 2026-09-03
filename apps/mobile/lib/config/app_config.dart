@@ -8,6 +8,10 @@ class AppConfig {
     required this.apiBaseUrl,
     required this.kakaoNativeAppKey,
     required this.naverMapClientId,
+    required this.tmapClientId,
+    required this.tmapApiKey,
+    required this.tmapUserKey,
+    required this.tmapDeviceKey,
     required this.completeViaSyncQueue,
     required this.todayServiceDateOverride,
     required this.workdayExecutionSessionV1,
@@ -20,6 +24,12 @@ class AppConfig {
 
   /// Optional. When null/empty, Naver map stays feature-gated (no init, no crash).
   final String? naverMapClientId;
+
+  /// Optional TMAP Navi PoC auth fields (debug entry only). Empty = PoC gated.
+  final String tmapClientId;
+  final String tmapApiKey;
+  final String tmapUserKey;
+  final String tmapDeviceKey;
 
   /// Feature flag: when true, Complete uses Operation Queue (Phase 2).
   /// Default false — existing map-spike complete path unchanged.
@@ -47,6 +57,10 @@ class AppConfig {
     final api = (dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:4000/v1').trim();
     final kakaoNative = (dotenv.env['KAKAO_NATIVE_APP_KEY'] ?? '').trim();
     final naverClient = (dotenv.env['NAVER_MAP_CLIENT_ID'] ?? '').trim();
+    final tmapClientId = (dotenv.env['TMAP_CLIENT_ID'] ?? '').trim();
+    final tmapApiKey = (dotenv.env['TMAP_API_KEY'] ?? '').trim();
+    final tmapUserKey = (dotenv.env['TMAP_USER_KEY'] ?? '').trim();
+    final tmapDeviceKey = (dotenv.env['TMAP_DEVICE_KEY'] ?? '').trim();
     final syncCompleteRaw =
         (dotenv.env['COMPLETE_VIA_SYNC_QUEUE'] ?? 'false').trim().toLowerCase();
     final completeViaSyncQueue =
@@ -92,6 +106,10 @@ class AppConfig {
       apiBaseUrl: api.replaceAll(RegExp(r'/$'), ''),
       kakaoNativeAppKey: kakaoNative,
       naverMapClientId: naverClient.isEmpty ? null : naverClient,
+      tmapClientId: tmapClientId,
+      tmapApiKey: tmapApiKey,
+      tmapUserKey: tmapUserKey,
+      tmapDeviceKey: tmapDeviceKey,
       completeViaSyncQueue: completeViaSyncQueue,
       todayServiceDateOverride:
           todayOverride.isEmpty ? null : todayOverride,

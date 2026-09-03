@@ -80,9 +80,11 @@ export interface ImportContextResolver {
   resolve(input: ImportContextResolveInput): ImportContextResolution;
 }
 
+import { evaluateImportContextResolution } from "./import-context.evaluator";
+
 /**
- * In-memory resolver for tests / local wiring.
- * Production will query delivery_sources; never trust CSV UUIDs blindly.
+ * In-memory resolver for unit tests and explicit dev fixtures only.
+ * Production uses SupabaseImportContextAuthority — never trust CSV UUIDs blindly.
  */
 export class FakeImportContextResolver implements ImportContextResolver {
   constructor(private readonly sources: ResolvedImportSource[] = []) {}
@@ -99,51 +101,12 @@ export class FakeImportContextResolver implements ImportContextResolver {
     if (sourceId) {
       found = this.sources.find((s) => s.id === sourceId);
     } else if (sourceKey) {
-      // Ambiguous without company/owner — mark unresolved rather than wrong match.
       const matches = this.sources.filter((s) => s.sourceKey === sourceKey);
       if (matches.length === 1) found = matches[0];
       else if (matches.length === 0) return { status: "source_not_found" };
       else return { status: "unresolved" };
     }
 
-    if (!found) return { status: "source_not_found" };
-    if (!found.isActive) return { status: "source_not_allowed" };
-
-    const allowed = IMPORTABLE_SOURCE_TYPES_BY_FORMAT[input.importFormat];
-    if (!allowed.has(found.sourceType)) {
-      return {
-        status: "source_type_not_importable",
-        actualSourceType: found.sourceType,
-        allowedSourceType: [...allowed].join("|"),
-      };
-    }
-
-    if (found.companyId != null) {
-      const actorCompanies = input.actorCompanyIds ?? [];
-      if (!actorCompanies.includes(found.companyId)) {
-        return { status: "source_not_allowed" };
-      }
-      if (
-        input.claimedCompanyId &&
-        input.claimedCompanyId !== found.companyId
-      ) {
-        return { status: "company_source_mismatch" };
-      }
-    }
-
-    if (found.ownerDriverId != null) {
-      if (
-        !input.actorDriverId ||
-        input.actorDriverId !== found.ownerDriverId
-      ) {
-        return { status: "personal_source_owner_mismatch" };
-      }
-    }
-
-    return {
-      status: "resolved",
-      source: found,
-      namespaceKey: `source:${found.id}`,
-    };
+    return evaluateImportContextResolution(found, input);
   }
 }

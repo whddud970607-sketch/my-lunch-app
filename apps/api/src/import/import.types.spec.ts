@@ -22,6 +22,7 @@ describe("Import foundation helpers", () => {
     addressRaw: "서울",
     addressNormalized: null,
     detailAddress: null,
+    complexName: null,
     deliveryMemo: null,
     displayLabel: null,
     barcodeRaw: null,

@@ -12,6 +12,7 @@ import { DeliverySessionsModule } from "./delivery-sessions/delivery-sessions.mo
 import { WorkdayModule } from "./workday/workday.module";
 import { ImportModule } from "./import/import.module";
 import { AddressModule } from "./address/address.module";
+import { ResolutionWorkerModule } from "./resolution-worker/resolution-worker.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AddressModule } from "./address/address.module";
     AccountRecoveryModule,
     ImportModule,
     AddressModule,
+    ResolutionWorkerModule,
   ],
   controllers: [HealthController],
 })

@@ -191,6 +191,7 @@ export function normalizeMappedRow(args: {
   const customerName = emptyToNull(mapped.customerName ?? null);
   const addressRaw = emptyToNull(mapped.address ?? null);
   const detailAddress = emptyToNull(mapped.addressDetail ?? null);
+  const complexName = emptyToNull(mapped.complexName ?? null);
   const deliveryMemo = emptyToNull(mapped.deliveryMemo ?? null);
   const displayLabel = emptyToNull(mapped.displayLabel ?? null);
   const barcodeRaw = emptyToNull(mapped.barcodeRaw ?? null);
@@ -210,6 +211,7 @@ export function normalizeMappedRow(args: {
     ["customerName", customerName],
     ["address", addressRaw],
     ["addressDetail", detailAddress],
+    ["complexName", complexName],
     ["deliveryMemo", deliveryMemo],
     ["displayLabel", displayLabel],
     ["barcodeRaw", barcodeRaw],
@@ -237,6 +239,7 @@ export function normalizeMappedRow(args: {
     addressRaw,
     addressNormalized,
     detailAddress,
+    complexName,
     deliveryMemo,
     displayLabel,
     barcodeRaw,

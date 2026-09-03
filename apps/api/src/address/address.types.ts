@@ -38,11 +38,24 @@ export type ResolutionFailureReason =
 export interface AddressResolutionInput {
   /** Full or road-level address string (PUBLIC/SYNTHETIC in tests). */
   roadAddress: string;
-  /** Optional detail: dong/ho, complex hints. */
+  /** Optional detail: dong/ho, and optionally "{complex} {dong}동 …". */
   detailAddress?: string | null;
-  /** Explicit complex / building name when known from import. */
+  /**
+   * Explicit complex / apartment name for Track A identity.
+   * Prefer complexNameHint when both are set.
+   */
   complexName?: string | null;
   buildingName?: string | null;
+  /**
+   * Canonical Track A complex-name hint (import/building metadata).
+   * Precedence: complexNameHint → complexName → buildingName → detail prefix.
+   */
+  complexNameHint?: string | null;
+  /**
+   * Explicit dong token when known from structured import (e.g. "504" | "A").
+   * Also accepts labeled forms "504동" / "A동".
+   */
+  dongHint?: string | null;
 }
 
 export interface ParsedAddress {
@@ -81,6 +94,20 @@ export interface PinPlacementDecision {
   allCandidates: CoordinateCandidate[];
   requiresDong: boolean;
 }
+
+export type {
+  IdentityProvenance,
+  GeometryProvenance,
+  VworldComplexEvidence,
+  BuildingResolutionProvenance,
+  ResolutionStageStatus,
+} from "./building/building-resolution.types";
+
+export {
+  IdentityProvenance as IDENTITY_PROVENANCE,
+  GeometryProvenance as GEOMETRY_PROVENANCE,
+  VworldComplexEvidence as VWORLD_COMPLEX_EVIDENCE,
+} from "./building/building-resolution.types";
 
 export interface AddressResolutionResult {
   parsed: ParsedAddress;

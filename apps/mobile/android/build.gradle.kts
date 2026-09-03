@@ -11,6 +11,9 @@ allprojects {
         maven {
             url = uri("https://www.jitpack.io")
         }
+        maven {
+            url = uri("https://devrepo.tmapadmin.com/repository/tmap-sdk-release/")
+        }
     }
 }
 

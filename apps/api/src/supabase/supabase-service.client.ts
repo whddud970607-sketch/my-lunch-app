@@ -6,15 +6,25 @@ import { ConfigService } from "@nestjs/config";
  * Service-role client for rare server-only operations
  * (e.g. emergency profile bootstrap if auth trigger lag, purge jobs, signed URLs).
  * Do NOT use for ordinary driver/company request data access.
+ *
+ * Client is initialized in the constructor (not only onModuleInit) so
+ * factories that inject this provider during DI setup see a ready client.
  */
 @Injectable()
 export class SupabaseServiceClient implements OnModuleInit {
   private readonly logger = new Logger(SupabaseServiceClient.name);
   private client: SupabaseClient | null = null;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    this.initialize();
+  }
 
   onModuleInit() {
+    this.initialize();
+  }
+
+  private initialize(): void {
+    if (this.client) return;
     const url = this.config.get<string>("SUPABASE_URL");
     const key = this.config.get<string>("SUPABASE_SERVICE_ROLE_KEY");
     if (!url || !key) {

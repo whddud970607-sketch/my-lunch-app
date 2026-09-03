@@ -14,6 +14,11 @@ import { NaverGeocodeAdapter } from "./adapters/naver-geocode.adapter";
 import { PublicBuildingDataAdapter } from "./adapters/public-building-data.adapter";
 import type { GeocodeProvider } from "./ports/geocode-provider.port";
 import type { BuildingDataProvider } from "./ports/building-data-provider.port";
+import {
+  DiagnosticStage,
+  emitDiagnostic,
+  type ResolutionDiagnosticSink,
+} from "./building/resolution-diagnostic-trace";
 
 const PRIMARY_CONFIDENCE_STOP = 0.78;
 const PROVIDER_TIMEOUT_MS = 8000;
@@ -22,6 +27,11 @@ export type ProviderOrchestrationPolicy = {
   primaryProviderId: "kakao" | "naver";
   secondaryProviderId: "kakao" | "naver" | null;
   invokePublicBuildingWhenDongRequired: boolean;
+};
+
+export type AddressResolveOptions = {
+  /** Scoped diagnostic collector — absent ⇒ no tracing. */
+  diagnosticTrace?: ResolutionDiagnosticSink | null;
 };
 
 @Injectable()
@@ -39,7 +49,7 @@ export class AddressResolutionService {
       this.config.get<string>("NAVER_MAP_CLIENT_ID"),
       this.config.get<string>("NAVER_MAP_CLIENT_SECRET"),
     );
-    this.publicBuilding = new PublicBuildingDataAdapter();
+    this.publicBuilding = new PublicBuildingDataAdapter({ config: this.config });
     this.geocodeProviders = [this.kakao, this.naver];
   }
 
@@ -54,8 +64,34 @@ export class AddressResolutionService {
     };
   }
 
-  async resolve(input: AddressResolutionInput): Promise<AddressResolutionResult> {
+  async resolve(
+    input: AddressResolutionInput,
+    options?: AddressResolveOptions,
+  ): Promise<AddressResolutionResult> {
+    const trace = options?.diagnosticTrace ?? null;
+
+    emitDiagnostic(trace, DiagnosticStage.INPUT_RECEIVED, {
+      hasComplexNameHint: Boolean(input.complexNameHint?.trim()),
+      hasDongHint: Boolean(input.dongHint?.trim()),
+      hasComplexName: Boolean(input.complexName?.trim()),
+      hasBuildingName: Boolean(input.buildingName?.trim()),
+      hasDetailAddress: Boolean(input.detailAddress?.trim()),
+    });
+
+    emitDiagnostic(trace, DiagnosticStage.HINTS_EXTRACTED, {
+      hasComplexNameHint: Boolean(input.complexNameHint?.trim()),
+      hasDongHint: Boolean(input.dongHint?.trim()),
+    });
+
     const parsed = parseAddress(input);
+
+    emitDiagnostic(trace, DiagnosticStage.ADDRESS_PARSED, {
+      hasParsedComplexName: Boolean(parsed.complexName),
+      hasParsedBuildingName: Boolean(parsed.buildingName),
+      hasParsedDong: Boolean(parsed.dong),
+      requiresDong: Boolean(parsed.dong),
+    });
+
     const requiresDong = Boolean(parsed.dong);
     const policy = this.getOrchestrationPolicy();
 
@@ -69,7 +105,17 @@ export class AddressResolutionService {
     if (primary?.isConfigured()) {
       candidates.push(...(await this.safeResolve(primary, parsed)));
     } else if (!secondary?.isConfigured()) {
-      return this.unresolvedResult(parsed, requiresDong, "provider_not_configured");
+      const unresolved = this.unresolvedResult(
+        parsed,
+        requiresDong,
+        "provider_not_configured",
+      );
+      emitDiagnostic(trace, DiagnosticStage.FINAL_RESOLUTION_DECISION, {
+        finalResolutionClass: unresolved.decision.pinQuality,
+        failureCode: unresolved.decision.unresolvedReason,
+        hasCandidate: false,
+      });
+      return unresolved;
     }
 
     const primaryBest = candidates[0];
@@ -86,7 +132,7 @@ export class AddressResolutionService {
       requiresDong &&
       !candidates.some(
         (c) =>
-          c.coordinateType === "BUILDING_CANDIDATE" && c.resolvedDong === parsed.dong,
+          isAuthoritativeDongCandidate(c) && c.resolvedDong === parsed.dong,
       );
 
     if (
@@ -95,7 +141,7 @@ export class AddressResolutionService {
       this.publicBuilding.isConfigured()
     ) {
       candidates.push(
-        ...(await this.safeResolveBuilding(this.publicBuilding, parsed)),
+        ...(await this.safeResolveBuilding(this.publicBuilding, parsed, trace)),
       );
     }
 
@@ -123,6 +169,14 @@ export class AddressResolutionService {
       }
     }
 
+    emitDiagnostic(trace, DiagnosticStage.FINAL_RESOLUTION_DECISION, {
+      finalResolutionClass: decision.pinQuality,
+      failureCode: decision.unresolvedReason,
+      hasCandidate: decision.candidate != null,
+      candidateCoordinateType: decision.candidate?.coordinateType ?? null,
+      candidateProvider: decision.candidate?.provider ?? null,
+    });
+
     return { parsed, decision };
   }
 
@@ -149,10 +203,12 @@ export class AddressResolutionService {
   private async safeResolveBuilding(
     provider: BuildingDataProvider,
     parsed: Parameters<BuildingDataProvider["resolveBuildingCandidates"]>[0],
+    trace: ResolutionDiagnosticSink | null,
   ): Promise<CoordinateCandidate[]> {
     try {
+      const resolve = provider.resolveBuildingCandidates.bind(provider);
       return await withTimeout(
-        provider.resolveBuildingCandidates(parsed),
+        resolve(parsed, trace ? { diagnosticTrace: trace } : undefined),
         PROVIDER_TIMEOUT_MS,
       );
     } catch {
@@ -178,6 +234,17 @@ export class AddressResolutionService {
       },
     };
   }
+}
+
+/** Keyword/radius Kakao dong hits are candidate-only — never block verified building chain. */
+function isAuthoritativeDongCandidate(candidate: CoordinateCandidate): boolean {
+  if (candidate.coordinateType === "BUILDING_CENTER") {
+    return candidate.resolvedDong != null;
+  }
+  if (candidate.coordinateType === "BUILDING_CANDIDATE") {
+    return !candidate.evidence.includes("NOT_BUILDING_IDENTITY_AUTHORITY");
+  }
+  return false;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

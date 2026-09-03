@@ -9,6 +9,7 @@ export type CanonicalImportField =
   | "customerName"
   | "address"
   | "addressDetail"
+  | "complexName"
   | "quantity"
   | "companyId"
   | "sourceId"
@@ -64,6 +65,18 @@ const ALIASES: Record<CanonicalImportField, readonly string[]> = {
     "detail",
     "상세주소",
     "동호수",
+  ],
+  complexName: [
+    "complex_name",
+    "complexname",
+    "building_name",
+    "buildingname",
+    "apartment_name",
+    "apartmentname",
+    "단지명",
+    "아파트명",
+    "건물명",
+    "단지",
   ],
   quantity: [
     "quantity",

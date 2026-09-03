@@ -7,6 +7,7 @@ import '../models/today_workset.dart';
 import '../utils/workday_end_hint.dart';
 import '../services/api_exception.dart';
 import '../navigation/kakao_navi_poc_bridge.dart';
+import '../navigation/tmap_navi_poc_bridge.dart';
 import '../services/today_workset_repository.dart';
 import '../state/auth_controller.dart';
 import '../state/delivery_session_controller.dart';
@@ -215,6 +216,34 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Kakao Navigation POC unavailable ($e)')),
+      );
+    }
+  }
+
+  Future<void> _launchTmapNaviPoc() async {
+    final apiKey = AppConfig.instance.tmapApiKey;
+    if (apiKey.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'TMAP Navigation POC gated: set TMAP_API_KEY in apps/mobile/.env',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await TmapNaviPocBridge.launch(
+        apiKey: apiKey,
+        clientId: AppConfig.instance.tmapClientId,
+        userKey: AppConfig.instance.tmapUserKey,
+        deviceKey: AppConfig.instance.tmapDeviceKey,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('TMAP Navigation POC unavailable ($e)')),
       );
     }
   }
@@ -703,6 +732,10 @@ class _HomeScreenState extends State<HomeScreen> {
               OutlinedButton(
                 onPressed: _launchKakaoNaviPoc,
                 child: const Text('Kakao Navigation POC'),
+              ),
+              OutlinedButton(
+                onPressed: _launchTmapNaviPoc,
+                child: const Text('TMAP Navigation POC'),
               ),
             ],
           ],

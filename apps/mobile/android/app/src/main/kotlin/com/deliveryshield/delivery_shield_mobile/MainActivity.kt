@@ -39,5 +39,36 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "delivery_shield/tmap_navi_poc",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "launch" -> {
+                    val apiKey = call.argument<String>("apiKey")?.trim()
+                    if (apiKey.isNullOrEmpty()) {
+                        result.error("missing_key", "TMAP API key required", null)
+                        return@setMethodCallHandler
+                    }
+                    val intent = Intent(this, TmapNaviPocActivity::class.java)
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_CLIENT_ID,
+                        call.argument<String>("clientId")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(TmapNaviPocActivity.EXTRA_API_KEY, apiKey)
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_USER_KEY,
+                        call.argument<String>("userKey")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_DEVICE_KEY,
+                        call.argument<String>("deviceKey")?.trim().orEmpty(),
+                    )
+                    startActivity(intent)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 }

@@ -121,6 +121,11 @@ export type NormalizedDeliveryDraft = {
   addressRaw: string | null;
   addressNormalized: string | null;
   detailAddress: string | null;
+  /**
+   * Optional apartment/complex/building name from import.
+   * Folded into detail_address at commit (no dedicated PII column).
+   */
+  complexName: string | null;
   deliveryMemo: string | null;
   displayLabel: string | null;
   barcodeRaw: string | null;
@@ -201,10 +206,11 @@ export type ImportValidationContextInput = {
 };
 
 export interface ImportCommitter {
-  commit(batchId: string, drafts: NormalizedDeliveryDraft[]): Promise<{
-    createdPointIds: string[];
-    createdShipmentIds: string[];
-  }>;
+  commit(
+    userClient: import("@supabase/supabase-js").SupabaseClient,
+    actor: { driverId: string; companyIds: string[] },
+    request: import("./import-commit.types").ImportCommitRequest,
+  ): Promise<import("./import-commit.types").ImportCommitResult>;
 }
 
 export function countIssues(
