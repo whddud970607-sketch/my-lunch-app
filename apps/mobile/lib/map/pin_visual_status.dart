@@ -2,10 +2,10 @@
 ///
 /// Extensible for future failed / retry colors without changing callers much.
 enum PinVisualStatus {
-  /// Pending / in-progress — red (default).
+  /// Incomplete / pending — primary blue family.
   open,
 
-  /// Fully completed at this location — gray / low chroma.
+  /// Fully completed at this location — success green family.
   completed,
 
   /// Reserved: failed stop (future).

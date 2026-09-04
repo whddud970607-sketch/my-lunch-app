@@ -7,7 +7,9 @@ import '../location/driver_location_icon_factory.dart';
 import '../location/driver_location_marker_state.dart';
 import 'delivery_location_pin.dart';
 import 'delivery_map_controller.dart';
+import 'kakao_driver_marker_styles.dart';
 import 'quantity_pin_icon.dart';
+
 /// Kakao Maps SDK host — existing spike behavior preserved.
 class KakaoDeliveryMap extends StatefulWidget {
   const KakaoDeliveryMap({
@@ -31,15 +33,27 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     implements DeliveryMapController {
   static const _mapKey = ValueKey('delivery-spike-kakao-map');
 
-  KakaoMapController? _controller;
   StreamSubscription<LabelClickEvent>? _labelSub;
   StreamSubscription<CameraMoveEndEvent>? _cameraSub;
   bool _markersPlaced = false;
   bool _driverLayerReady = false;
   bool _programmaticCameraMove = false;
+  final KakaoMapHostGuard<KakaoMapController> _host = KakaoMapHostGuard();
   void Function()? _onUserGesture;
-  String? _driverStyleKey;
+  final KakaoDriverMarkerStyleCache _driverStyles =
+      KakaoDriverMarkerStyleCache();
+  String? _driverMarkerStyleId;
+  double? _driverMarkerLat;
+  double? _driverMarkerLng;
   List<DeliveryLocationPin> _pins = const [];
+
+  KakaoMapController? get _controller => _host.attached;
+
+  bool get _disposed => _host.disposed;
+
+  bool _isCurrentController(KakaoMapController controller) =>
+      _host.isCurrent(controller);
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +70,8 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   void dispose() {
     _labelSub?.cancel();
     _cameraSub?.cancel();
+    _host.dispose();
+    _driverStyles.reset();
     super.dispose();
   }
 
@@ -63,21 +79,32 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   void setUserGestureListener(void Function()? onUserGesture) {
     _onUserGesture = onUserGesture;
   }
+
   Future<void> _onMapCreated(KakaoMapController controller) async {
-    _controller = controller;
+    if (_host.disposed) return;
+    _host.attach(controller);
+    _driverStyles.reset();
+    _driverMarkerStyleId = null;
+    _driverMarkerLat = null;
+    _driverMarkerLng = null;
+    _driverLayerReady = false;
+    _markersPlaced = false;
     await _labelSub?.cancel();
+    if (!_isCurrentController(controller)) return;
     _labelSub = controller.onLabelClickedStream.listen((event) {
       if (event.labelId == DriverLocationMarkerIds.markerId) return;
       widget.onPinTap(event.labelId);
     });
     _cameraSub?.cancel();
     _cameraSub = controller.onCameraMoveEndStream.listen((_) {
+      if (_disposed) return;
       if (_programmaticCameraMove) {
         _programmaticCameraMove = false;
         return;
       }
       _onUserGesture?.call();
-    });    widget.onReady(this);
+    });
+    widget.onReady(this);
     if (_pins.isNotEmpty) {
       await syncPins(_pins);
     }
@@ -123,12 +150,12 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   @override
   Future<void> syncPins(List<DeliveryLocationPin> pins) async {
     final controller = _controller;
-    if (controller == null || pins.isEmpty) return;
+    if (controller == null || pins.isEmpty || _disposed) return;
     _pins = List<DeliveryLocationPin>.unmodifiable(pins);
 
     if (!_markersPlaced) {
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      if (!mounted || _controller != controller) return;
+      if (!_isCurrentController(controller)) return;
 
       final focus = pins.first;
       debugPrint(
@@ -145,8 +172,10 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         debugPrint('kakao-map addMarkerLayer FAIL: ${e.runtimeType}');
         rethrow;
       }
+      if (!_isCurrentController(controller)) return;
 
       await _registerQuantityStyles(controller, pins);
+      if (!_isCurrentController(controller)) return;
 
       final options = pins
           .map(
@@ -170,6 +199,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
       } else {
         await controller.addMarkers(markerOptions: options);
       }
+      if (!_isCurrentController(controller)) return;
 
       // Multi-stop: use parent initialTarget (namdong cluster), never fit Incheon+Seoul.
       final zoomLevel = pins.length > 1 ? 11 : 17;
@@ -194,6 +224,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
 
     // Subsequent sync: re-register styles and replace markers one by one.
     await _registerQuantityStyles(controller, pins);
+    if (!_isCurrentController(controller)) return;
     for (final pin in pins) {
       try {
         await controller.removeMarker(id: pin.markerId);
@@ -214,13 +245,14 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
 
   @override
   Future<void> removePin(String markerId) async {
+    if (_disposed) return;
     await _controller?.removeMarker(id: markerId);
   }
 
   @override
   Future<void> upsertPin(DeliveryLocationPin pin) async {
     final controller = _controller;
-    if (controller == null) return;
+    if (controller == null || _disposed) return;
     await _registerQuantityStyles(controller, [pin]);
     try {
       await controller.removeMarker(id: pin.markerId);
@@ -239,7 +271,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   }
 
   Future<void> _ensureDriverLayer(KakaoMapController controller) async {
-    if (_driverLayerReady) return;
+    if (_driverLayerReady || _disposed) return;
     try {
       await controller.addMarkerLayer(
         layerId: DriverLocationMarkerIds.kakaoLayerId,
@@ -255,48 +287,52 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   @override
   Future<void> upsertDriverMarker(DriverLocationMarkerState state) async {
     final controller = _controller;
-    if (controller == null) return;
+    if (controller == null || _disposed) return;
     await _ensureDriverLayer(controller);
+    if (!_isCurrentController(controller)) return;
 
-    final styleKey = DriverLocationIconFactory.cacheKey(
-      vehicle: state.vehicle,
-      headingBucket: DriverLocationIconFactory.bucketHeading(
-        state.headingDegrees,
-      ),
-      accuracy: DriverGpsAccuracyVisual.fromMeters(state.accuracyMeters),
-      sessionActive: state.sessionActive,
-    );
-    if (_driverStyleKey != styleKey) {
+    final styleId = KakaoDriverMarkerStyles.styleIdForState(state);
+    if (KakaoDriverMarkerStyles.sameBucketAndPosition(
+      lastStyleId: _driverMarkerStyleId,
+      styleId: styleId,
+      lastLatitude: _driverMarkerLat,
+      lastLongitude: _driverMarkerLng,
+      latitude: state.latitude,
+      longitude: state.longitude,
+    )) {
+      return;
+    }
+
+    if (!_driverStyles.isRegistered(styleId)) {
       final bytes = await DriverLocationIconFactory.rotatedBytesFor(
         vehicle: state.vehicle,
         headingDegrees: state.headingDegrees,
         accuracyMeters: state.accuracyMeters,
         sessionActive: state.sessionActive,
       );
-      try {
-        await controller.removeMarkerStyles(
-          styleIds: [DriverLocationMarkerIds.kakaoStyleId],
-        );
-      } catch (_) {}
+      if (!_isCurrentController(controller)) return;
       await controller.registerMarkerStyles(
         styles: [
           MarkerStyle(
-            styleId: DriverLocationMarkerIds.kakaoStyleId,
+            styleId: styleId,
             perLevels: [
               MarkerPerLevelStyle.fromBytes(bytes: bytes, level: 0),
             ],
           ),
         ],
       );
-      _driverStyleKey = styleKey;
+      if (!_isCurrentController(controller)) return;
+      _driverStyles.markRegistered(styleId);
     }
 
+    // Plugin has no moveMarker; remove/add is allowed once the style exists.
     try {
       await controller.removeMarker(
         id: DriverLocationMarkerIds.markerId,
         layerId: DriverLocationMarkerIds.kakaoLayerId,
       );
     } catch (_) {}
+    if (!_isCurrentController(controller)) return;
     await controller.addMarker(
       markerOption: MarkerOption(
         id: DriverLocationMarkerIds.markerId,
@@ -304,24 +340,30 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
           latitude: state.latitude,
           longitude: state.longitude,
         ),
-        styleId: DriverLocationMarkerIds.kakaoStyleId,
+        styleId: styleId,
         rank: 2000,
       ),
       layerId: DriverLocationMarkerIds.kakaoLayerId,
     );
+    if (!_isCurrentController(controller)) return;
+    _driverMarkerStyleId = styleId;
+    _driverMarkerLat = state.latitude;
+    _driverMarkerLng = state.longitude;
   }
 
   @override
   Future<void> removeDriverMarker() async {
     final controller = _controller;
-    if (controller == null) return;
+    if (controller == null || _disposed) return;
     try {
       await controller.removeMarker(
         id: DriverLocationMarkerIds.markerId,
         layerId: DriverLocationMarkerIds.kakaoLayerId,
       );
     } catch (_) {}
-    _driverStyleKey = null;
+    _driverMarkerStyleId = null;
+    _driverMarkerLat = null;
+    _driverMarkerLng = null;
   }
 
   static const _routeLayerId = 'delivery-route-trail';
@@ -410,8 +452,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     bool programmatic = false,
   }) async {
     final controller = _controller;
-    if (controller == null) return;
-    if (programmatic) _programmaticCameraMove = true;
+    if (controller == null || _disposed) return;
     await controller.moveCamera(
       cameraUpdate: CameraUpdate(
         position: LatLng(

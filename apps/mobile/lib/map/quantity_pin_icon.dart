@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/app_colors.dart';
 import 'pin_visual_status.dart';
 
 /// Builds high-res pin bitmaps with quantity drawn in the white circle.
@@ -45,12 +46,11 @@ class QuantityPinIconFactory {
   static Color _pinColor(PinVisualStatus status) {
     switch (status) {
       case PinVisualStatus.open:
-        return const Color(0xFFE53935);
+        return AppColors.primary;
       case PinVisualStatus.completed:
-        // Low-chroma gray; still visible, clearly "done".
-        return const Color(0xFF9E9E9E);
+        return AppColors.success;
       case PinVisualStatus.failed:
-        return const Color(0xFFFB8C00);
+        return AppColors.warning;
       case PinVisualStatus.retry:
         return const Color(0xFF8E24AA);
     }

@@ -5,6 +5,8 @@ import '../location/driver_vehicle_type.dart';
 import '../map/map_provider_id.dart';
 import '../map/map_provider_settings.dart';
 import '../map/naver_map_feature.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
 
 /// Driver settings: choose Kakao vs Naver map SDK.
 class MapSettingsScreen extends StatefulWidget {
@@ -65,10 +67,14 @@ class _MapSettingsScreenState extends State<MapSettingsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
               children: [
-                const ListTile(
-                  title: Text('지도 제공자'),
-                  subtitle: Text('배송 지도에 사용할 지도를 선택합니다'),
+                ListTile(
+                  title: Text(
+                    '지도 제공자',
+                    style: AppTypography.textTheme.titleSmall,
+                  ),
+                  subtitle: const Text('배송 지도에 사용할 지도를 선택합니다'),
                 ),
                 ListTile(
                   title: Text(MapProviderId.kakao.displayLabel),
@@ -86,9 +92,9 @@ class _MapSettingsScreenState extends State<MapSettingsScreen> {
                   subtitle: Text(
                     NaverMapFeature.isConfigured
                         ? (NaverMapFeature.isReady
-                            ? 'Client ID 준비됨'
-                            : 'Client ID 있음 · 초기화 확인 필요')
-                        : 'Client ID 미설정 · 선택 가능하나 지도는 안내 화면',
+                            ? '사용 가능'
+                            : '준비됨 · 지도 진입 시 확인')
+                        : '미설정 · 선택 가능하나 안내 화면이 표시됩니다',
                   ),
                   leading: Icon(
                     _selected == MapProviderId.naver
@@ -99,9 +105,12 @@ class _MapSettingsScreenState extends State<MapSettingsScreen> {
                   onTap: () => _onSelect(MapProviderId.naver),
                 ),
                 const Divider(),
-                const ListTile(
-                  title: Text('운송수단 아이콘'),
-                  subtitle: Text('내 위치 마커에 표시할 차량 아이콘'),
+                ListTile(
+                  title: Text(
+                    '운송수단 아이콘',
+                    style: AppTypography.textTheme.titleSmall,
+                  ),
+                  subtitle: const Text('내 위치 마커에 표시할 차량 아이콘'),
                 ),
                 ListTile(
                   title: Text(DriverVehicleType.truck.displayLabel),
@@ -127,13 +136,11 @@ class _MapSettingsScreenState extends State<MapSettingsScreen> {
                 ),
                 const Divider(),
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppSpacing.md),
                   child: Text(
-                    '선택값은 기기에 저장되며 앱을 다시 실행해도 유지됩니다.\n'
-                    '배송 데이터·완료·사진은 지도 제공자와 무관합니다.\n'
-                    'NCP 등록: Android com.deliveryshield.delivery_shield_mobile / '
-                    'iOS com.deliveryshield.deliveryShieldMobile',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    '선택값은 이 기기에 저장되며 앱을 다시 실행해도 유지됩니다.\n'
+                    '배송 데이터·완료·사진은 지도 제공자와 무관합니다.',
+                    style: AppTypography.textTheme.bodySmall,
                   ),
                 ),
               ],

@@ -1,26 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
     <FrameLayout
         android:id="@+id/tmap_ui_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <TextView
-        android:id="@+id/poc_banner"
-        android:layout_width="wrap_content"
+    <!-- High-elevation chrome so SurfaceView/guidance overlays do not eat close taps. -->
+    <LinearLayout
+        android:id="@+id/poc_chrome"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_margin="12dp"
-        android:background="#CC000000"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:text="TMAP DEVELOPMENT POC"
-        android:textColor="#FFFFFF"
-        android:textSize="12sp"
-        android:textStyle="bold" />
+        android:layout_gravity="top"
+        android:clickable="true"
+        android:clipChildren="false"
+        android:elevation="48dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:translationZ="48dp">
+
+        <TextView
+            android:id="@+id/poc_banner"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="#CC000000"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp"
+            android:text="TMAP DEVELOPMENT POC"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/btn_close"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:background="#CC000000"
+            android:contentDescription="Close POC"
+            android:elevation="8dp"
+            android:padding="8dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:tint="#FFFFFF" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/poc_status"
@@ -28,20 +56,10 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:background="#CC000000"
+        android:elevation="48dp"
         android:padding="12dp"
         android:text="Initializing…"
         android:textColor="#FFFFFF"
-        android:textSize="12sp" />
-
-    <ImageButton
-        android:id="@+id/btn_close"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_gravity="top|end"
-        android:layout_margin="12dp"
-        android:background="#CC000000"
-        android:contentDescription="Close POC"
-        android:padding="8dp"
-        android:src="@android:drawable/ic_menu_close_clear_cancel"
-        android:tint="#FFFFFF" />
+        android:textSize="12sp"
+        android:translationZ="48dp" />
 </FrameLayout>

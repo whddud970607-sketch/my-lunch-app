@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 
 import '../copy/delivery_report_copy.dart';
-import '../map/delivery_location_pin.dart';
 import '../map/delivery_map_controller.dart';
 import '../map/delivery_map_surface.dart';
 import '../map/map_provider_id.dart';
 import '../map/map_provider_settings.dart';
 import '../models/delivery_session.dart';
 import '../services/api_client.dart';
-import '../services/map_spike_service.dart';
 import '../state/delivery_session_controller.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import '../widgets/ds_card.dart';
+import '../widgets/ds_primary_button.dart';
+import 'workday_report_data.dart';
+import 'workday_report_keys.dart';
 
 class DeliveryReportScreen extends StatefulWidget {
   const DeliveryReportScreen({
@@ -44,7 +48,6 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
   List<DeliveryLatLng> _route = const [];
   DeliveryLatLng? _start;
   DeliveryLatLng? _end;
-  List<DeliveryLocationPin> _pins = const [];
   MapProviderId _provider = MapProviderId.kakao;
   DeliveryMapController? _map;
 
@@ -210,14 +213,6 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
     required DeliveryLatLng? start,
     required DeliveryLatLng? end,
   }) async {
-    var pins = <DeliveryLocationPin>[];
-    try {
-      final list =
-          await MapSpikeService(widget.apiClient).fetchNamdong10Points();
-      final completed = list.points.where((p) => p.statusCode == 'completed');
-      pins = groupPointsByLocation(completed);
-    } catch (_) {}
-
     if (!mounted) return;
     setState(() {
       _progress = progress;
@@ -225,7 +220,6 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
       _route = route;
       _start = start;
       _end = end;
-      _pins = pins;
       _loading = false;
     });
     await _paintRoute();
@@ -234,7 +228,7 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
   Future<void> _paintRoute() async {
     final map = _map;
     if (map == null) return;
-    await map.syncPins(_pins);
+    await map.syncPins(const []);
     await map.setRoutePolyline(_route);
     await map.setSessionEndpoints(start: _start, end: _end);
     final focus = _start ?? (_route.isNotEmpty ? _route.first : null);
@@ -250,16 +244,29 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
       progress: _progress,
       durationSeconds: _durationSeconds,
     );
+    final metrics = workdayReportMetrics(
+      progress: _progress,
+      durationSeconds: _durationSeconds,
+      hasRoute: _route.isNotEmpty || _start != null || _end != null,
+    );
 
     return Scaffold(
+      key: WorkdayReportKeys.screen,
       appBar: AppBar(title: const Text('오늘의 배송')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              key: WorkdayReportKeys.loading,
+              child: CircularProgressIndicator(),
+            )
           : _error != null
-              ? Center(child: Text(_error!))
+              ? _ReportError(
+                  message: _error!,
+                  onRetry: _load,
+                )
               : ListView(
                   children: [
                     SizedBox(
+                      key: WorkdayReportKeys.route,
                       height: 280,
                       child: DeliveryMapSurface(
                         providerId: _provider,
@@ -268,7 +275,7 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
                               latitude: 37.5665,
                               longitude: 126.9780,
                             ),
-                        pins: _pins,
+                        pins: const [],
                         onPinTap: (_) {},
                         onReady: (c) async {
                           _map = c;
@@ -277,40 +284,105 @@ class _DeliveryReportScreenState extends State<DeliveryReportScreen> {
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(AppSpacing.lg),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text(
-                            '총 배송시간',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          DsCard(
+                            child: Column(
+                              key: WorkdayReportKeys.metrics,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  '총 배송시간',
+                                  style: AppTypography.textTheme.titleMedium,
+                                ),
+                                Text(
+                                  metrics.durationLabel,
+                                  key: WorkdayReportKeys.duration,
+                                  style: AppTypography.textTheme.headlineSmall,
+                                ),
+                                const SizedBox(height: AppSpacing.md),
+                                Text(
+                                  '전체 배송 ${metrics.totalPoints}건',
+                                  key: WorkdayReportKeys.total,
+                                ),
+                                Text(
+                                  '완료 ${metrics.completedPoints}건',
+                                  key: WorkdayReportKeys.completed,
+                                ),
+                                Text(
+                                  '미완료 ${metrics.remainingPoints}건',
+                                  key: WorkdayReportKeys.remaining,
+                                ),
+                                Text(
+                                  '진행 ${metrics.progressPercent}%',
+                                  key: WorkdayReportKeys.progress,
+                                ),
+                                if (metrics.hasRoute) ...[
+                                  const SizedBox(height: AppSpacing.sm),
+                                  Text(
+                                    '오늘 기록된 경로',
+                                    style: AppTypography.textTheme.bodySmall,
+                                  ),
+                                ],
+                                if (metrics.failedPoints > 0)
+                                  Text('실패 ${metrics.failedPoints}건'),
+                                if (metrics.totalQuantity > 0)
+                                  Text('물량 ${metrics.totalQuantity}'),
+                              ],
+                            ),
                           ),
-                          Text(
-                            DeliveryReportCopy.formatDuration(_durationSeconds),
-                            style: Theme.of(context).textTheme.headlineSmall,
-                          ),
-                          const SizedBox(height: 16),
-                          Text('전체 배송 ${_progress.totalPoints}건'),
-                          Text('완료 ${_progress.completedPoints}건'),
-                          Text('미완료 ${_progress.incompletePoints}건'),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: AppSpacing.lg),
                           Text(
                             headline,
-                            style: Theme.of(context).textTheme.titleMedium,
+                            style: AppTypography.textTheme.titleMedium,
                           ),
-                          const SizedBox(height: 8),
-                          Text(body),
-                          const SizedBox(height: 24),
-                          FilledButton(
-                            onPressed: () =>
-                                Navigator.of(context).popUntil((r) => r.isFirst),
-                            child: const Text('홈으로'),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(body, style: AppTypography.textTheme.bodyMedium),
+                          const SizedBox(height: AppSpacing.xl),
+                          DsPrimaryButton(
+                            key: WorkdayReportKeys.home,
+                            label: '홈으로',
+                            onPressed: () => Navigator.of(context)
+                                .popUntil((r) => r.isFirst),
                           ),
                         ],
                       ),
                     ),
                   ],
                 ),
+    );
+  }
+}
+
+class _ReportError extends StatelessWidget {
+  const _ReportError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            message,
+            key: WorkdayReportKeys.error,
+            style: AppTypography.textTheme.bodyLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          DsPrimaryButton(
+            key: WorkdayReportKeys.retry,
+            label: '다시 시도',
+            onPressed: onRetry,
+          ),
+        ],
+      ),
     );
   }
 }

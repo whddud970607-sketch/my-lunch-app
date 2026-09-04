@@ -110,6 +110,28 @@ export class DeliveriesRepository {
     return (data as MapSpikePointRow[]) ?? [];
   }
 
+  async findFirstPointIdForJob(
+    userClient: SupabaseClient,
+    driverId: string,
+    jobId: string,
+  ): Promise<string | null> {
+    const { data, error } = await userClient
+      .from("delivery_points")
+      .select("id")
+      .eq("driver_id", driverId)
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(`delivery_points by job failed code=${error.code}`);
+      return null;
+    }
+    const id = (data as { id?: string } | null)?.id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  }
+
   /** Owned point lookup for pin adjust / complete (spike or fixture). */
   async findPointForDriver(
     userClient: SupabaseClient,

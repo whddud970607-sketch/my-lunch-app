@@ -1,11 +1,21 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/map_spike_point.dart';
+import '../screens/delivery_detail_data.dart';
+import '../screens/delivery_detail_keys.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_radius.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import 'ds_card.dart';
+import 'ds_primary_button.dart';
+import 'ds_status_badge.dart';
 
-/// Shared delivery detail panel — independent of map SDK.
+/// Shared Point-centric delivery detail. Map and list reuse this panel.
 class DeliveryDetailPanel extends StatefulWidget {
   const DeliveryDetailPanel({
     super.key,
@@ -13,10 +23,12 @@ class DeliveryDetailPanel extends StatefulWidget {
     required this.totalQuantity,
     required this.clusteredJobCount,
     required this.onClose,
+    this.shipmentCount,
     this.onAdjustPin,
     this.onComplete,
     this.onNavigate,
     this.onRevealAccessInfo,
+    this.onHydratePoint,
     this.clusterPoints,
     this.onSelectClusterPoint,
   });
@@ -24,6 +36,7 @@ class DeliveryDetailPanel extends StatefulWidget {
   final MapSpikePoint point;
   final int totalQuantity;
   final int clusteredJobCount;
+  final int? shipmentCount;
   final VoidCallback onClose;
   final VoidCallback? onAdjustPin;
   final VoidCallback? onComplete;
@@ -31,6 +44,9 @@ class DeliveryDetailPanel extends StatefulWidget {
 
   /// Nest GET access-info. Must not log the returned secret.
   final Future<String> Function(String pointId)? onRevealAccessInfo;
+
+  /// Optional existing point-detail fetch. Failures stay on operational data.
+  final Future<MapSpikePoint> Function(String pointId)? onHydratePoint;
 
   /// Same-location points (visual aggregation only). Identities stay separate.
   final List<MapSpikePoint>? clusterPoints;
@@ -41,16 +57,28 @@ class DeliveryDetailPanel extends StatefulWidget {
 }
 
 class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
-  static const _revealTtl = Duration(seconds: 30);
-
   bool _accessLoading = false;
   String? _accessPlaintext;
   String? _accessError;
-  Timer? _maskTimer;
+  Timer? _accessMaskTimer;
+
+  bool _phoneRevealed = false;
+  Timer? _phoneMaskTimer;
+
+  MapSpikePoint? _hydrated;
+
+  MapSpikePoint get _point => _hydrated ?? widget.point;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_hydrate());
+  }
 
   @override
   void dispose() {
-    _maskTimer?.cancel();
+    _accessMaskTimer?.cancel();
+    _phoneMaskTimer?.cancel();
     _accessPlaintext = null;
     super.dispose();
   }
@@ -59,16 +87,39 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
   void didUpdateWidget(covariant DeliveryDetailPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.point.pointId != widget.point.pointId) {
+      _hydrated = null;
       _clearAccessReveal();
+      _clearPhoneReveal();
+      unawaited(_hydrate());
+    }
+  }
+
+  Future<void> _hydrate() async {
+    final fetch = widget.onHydratePoint;
+    if (fetch == null) return;
+    try {
+      final rich = await fetch(widget.point.pointId);
+      if (!mounted) return;
+      setState(() {
+        _hydrated = mergeHydratedDetail(widget.point, rich);
+      });
+    } catch (_) {
+      // Keep operational point; do not block the sheet.
     }
   }
 
   void _clearAccessReveal() {
-    _maskTimer?.cancel();
-    _maskTimer = null;
+    _accessMaskTimer?.cancel();
+    _accessMaskTimer = null;
     _accessPlaintext = null;
     _accessError = null;
     _accessLoading = false;
+  }
+
+  void _clearPhoneReveal() {
+    _phoneMaskTimer?.cancel();
+    _phoneMaskTimer = null;
+    _phoneRevealed = false;
   }
 
   Future<void> _toggleAccess() async {
@@ -89,8 +140,8 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
         _accessPlaintext = value;
         _accessLoading = false;
       });
-      _maskTimer?.cancel();
-      _maskTimer = Timer(_revealTtl, () {
+      _accessMaskTimer?.cancel();
+      _accessMaskTimer = Timer(detailRevealTtl, () {
         if (!mounted) return;
         setState(_clearAccessReveal);
       });
@@ -103,292 +154,46 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
     }
   }
 
+  void _togglePhone() {
+    if (_phoneRevealed) {
+      setState(_clearPhoneReveal);
+      return;
+    }
+    if (!detailShowPhoneActions(_point)) return;
+    setState(() => _phoneRevealed = true);
+    _phoneMaskTimer?.cancel();
+    _phoneMaskTimer = Timer(detailRevealTtl, () {
+      if (!mounted) return;
+      setState(_clearPhoneReveal);
+    });
+  }
+
   Future<void> _dial() async {
-    final value = widget.point.contactValue?.trim();
+    final value = _point.contactValue?.trim();
     if (value == null || value.isEmpty) return;
-    final uri = Uri(scheme: 'tel', path: value);
-    await launchUrl(uri);
+    await launchUrl(Uri(scheme: 'tel', path: value));
   }
 
   Future<void> _sms() async {
-    final value = widget.point.contactValue?.trim();
+    final value = _point.contactValue?.trim();
     if (value == null || value.isEmpty) return;
-    final uri = Uri(scheme: 'sms', path: value);
-    await launchUrl(uri);
+    await launchUrl(Uri(scheme: 'sms', path: value));
+  }
+
+  Future<void> _copyAddress() async {
+    final value = detailAddressLine(_point);
+    if (value == null) return;
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('주소를 복사했습니다')),
+    );
   }
 
   void _handleClose() {
     _clearAccessReveal();
+    _clearPhoneReveal();
     widget.onClose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final point = widget.point;
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    final theme = Theme.of(context);
-
-    return Material(
-      elevation: 12,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      clipBehavior: Clip.antiAlias,
-      child: SafeArea(
-        top: false,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragEnd: (details) {
-            if ((details.primaryVelocity ?? 0) > 200) {
-              _handleClose();
-            }
-          },
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(16, 8, 8, 16 + bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: theme.dividerColor,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '배송지 상세',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '닫기',
-                      onPressed: _handleClose,
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                if (_showClusterPicker) ...[
-                  const SizedBox(height: 4),
-                  Text('같은 위치의 배송', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final p in widget.clusterPoints!)
-                        ChoiceChip(
-                          selected: p.pointId == point.pointId,
-                          label: Text(_clusterChipLabel(p)),
-                          onSelected: (_) =>
-                              widget.onSelectClusterPoint?.call(p),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if (_contextLine(point) != null) ...[
-                  Text(
-                    _contextLine(point)!,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                const SizedBox(height: 4),
-                _row(context, '고객', point.customerName),
-                _row(context, '주소', point.address),
-                _row(context, '상세주소', point.detailAddress),
-                if ((point.deliveryMemo ?? '').trim().isNotEmpty)
-                  _row(context, '배송메모', point.deliveryMemo!.trim()),
-                const SizedBox(height: 12),
-                Text('출입정보', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 6),
-                if (point.piiMasked || point.isCompleted)
-                  Text(
-                    '완료 배송지는 출입정보를 표시하지 않습니다',
-                    style: theme.textTheme.bodyMedium,
-                  )
-                else if (!point.hasAccessInfo)
-                  Text(
-                    '등록된 출입정보 없음',
-                    style: theme.textTheme.bodyMedium,
-                  )
-                else ...[
-                  OutlinedButton(
-                    onPressed: _accessLoading ? null : _toggleAccess,
-                    child: Text(
-                      _accessPlaintext != null ? '출입정보 숨기기' : '출입정보 보기',
-                    ),
-                  ),
-                  if (_accessLoading)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: LinearProgressIndicator(),
-                    ),
-                  if (_accessError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        _accessError!,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  if (_accessPlaintext != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Semantics(
-                        label: '출입정보 표시됨',
-                        child: Text(
-                          _accessPlaintext!,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ),
-                    ),
-                ],
-                const SizedBox(height: 12),
-                Text('배송 물품', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 4),
-                _row(context, '상품', point.product),
-                _row(context, '총 수량', '${widget.totalQuantity}개'),
-                if (widget.clusteredJobCount > 1)
-                  _row(context, '묶음', '${widget.clusteredJobCount}건 동일 위치'),
-                const SizedBox(height: 6),
-                Text('송장 목록', style: theme.textTheme.labelLarge),
-                const SizedBox(height: 4),
-                if (point.shipments.isEmpty)
-                  Text(
-                    '등록된 송장코드 없음',
-                    style: theme.textTheme.bodySmall,
-                  )
-                else
-                  ...point.shipments.map(
-                    (s) => Semantics(
-                      label: '송장 ${s.trackingCode} ${s.status}',
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Text(
-                              '${s.sequenceNo}. ',
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            Expanded(child: Text(s.trackingCode)),
-                            Text(
-                              s.status,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                if (point.shipments.isNotEmpty &&
-                    point.shipments.length != widget.totalQuantity)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '주의: 송장 ${point.shipments.length}건 ≠ 수량 ${widget.totalQuantity}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Text('고객 연락', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 6),
-                if (!point.canContact)
-                  Text(
-                    point.piiMasked || point.isCompleted
-                        ? '완료 후 연락처는 사용할 수 없습니다'
-                        : '등록된 연락처 없음',
-                    style: theme.textTheme.bodyMedium,
-                  )
-                else ...[
-                  _row(context, '연락처', point.contactValue ?? ''),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _dial,
-                          icon: const Icon(Icons.phone),
-                          label: const Text('전화하기'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _sms,
-                          icon: const Icon(Icons.sms_outlined),
-                          label: const Text('문자하기'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    if (widget.onNavigate != null)
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: widget.onNavigate,
-                          icon: const Icon(Icons.navigation_outlined),
-                          label: const Text('길안내'),
-                        ),
-                      ),
-                    if (widget.onNavigate != null && widget.onComplete != null)
-                      const SizedBox(width: 8),
-                    if (widget.onComplete != null)
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed:
-                              point.isCompleted ? null : widget.onComplete,
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: const Text('배송완료'),
-                        ),
-                      ),
-                  ],
-                ),
-                if (widget.onAdjustPin != null && !point.isCompleted) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: widget.onAdjustPin,
-                    child: const Text('핀 위치 조정'),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _row(BuildContext context, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 72,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          Expanded(child: Text(value)),
-        ],
-      ),
-    );
   }
 
   bool get _showClusterPicker =>
@@ -400,21 +205,371 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
     final src = (p.sourceLabel ?? '').trim();
     if (src.isNotEmpty) parts.add(src);
     final product = p.product.trim();
-    if (product.isNotEmpty) {
+    if (!isMaskedOrEmpty(product)) {
       parts.add(product);
     } else {
-      parts.add('qty ${p.quantity}');
+      parts.add('물량 ${p.quantity}');
     }
     return parts.join(' · ');
   }
 
-  String? _contextLine(MapSpikePoint point) {
-    final parts = <String>[];
-    final company = (point.companyLabel ?? '').trim();
-    if (company.isNotEmpty) parts.add(company);
-    final source = (point.sourceLabel ?? '').trim();
-    if (source.isNotEmpty) parts.add(source);
-    if (parts.isEmpty) return null;
-    return parts.join(' · ');
+  @override
+  Widget build(BuildContext context) {
+    final point = _point;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    final completed = point.isCompleted;
+    final canNavigate =
+        widget.onNavigate != null && detailCanNavigate(point);
+    final showComplete =
+        widget.onComplete != null && detailShowComplete(point);
+    final deliveryCount = detailDeliveryCount(
+      point: point,
+      shipmentCount: widget.shipmentCount,
+      clusteredJobCount: widget.clusteredJobCount,
+    );
+    final company = detailCompanyLabel(point);
+    final source = detailSourceLabel(point);
+    final address = detailAddressLine(point);
+    final addressDetail = detailAddressDetailLine(point);
+    final memo = detailMemoLine(point);
+    final shipments = detailShipments(point);
+    final phoneValue = point.contactValue?.trim();
+
+    return Material(
+      color: AppColors.surfaceElevated,
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(AppRadius.lg),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SafeArea(
+        top: false,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragEnd: (details) {
+            if ((details.primaryVelocity ?? 0) > 200) {
+              _handleClose();
+            }
+          },
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.sm,
+              AppSpacing.md + bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: AppColors.outline,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        detailPointHeader(point),
+                        key: DeliveryDetailKeys.header,
+                        style: AppTypography.textTheme.titleLarge,
+                      ),
+                    ),
+                    DsStatusBadge(
+                      key: DeliveryDetailKeys.status,
+                      label: detailStatusLabel(point),
+                      tone: completed
+                          ? DsStatusTone.success
+                          : DsStatusTone.active,
+                    ),
+                    IconButton(
+                      tooltip: '닫기',
+                      onPressed: _handleClose,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                if (_showClusterPicker) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text('같은 위치의 배송', style: AppTypography.textTheme.titleSmall),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: [
+                      for (final p in widget.clusterPoints!)
+                        ChoiceChip(
+                          selected: p.pointId == point.pointId,
+                          label: Text(_clusterChipLabel(p)),
+                          onSelected: (_) =>
+                              widget.onSelectClusterPoint?.call(p),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                DsCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '배송 $deliveryCount건 · 물량 ${widget.totalQuantity}',
+                        key: DeliveryDetailKeys.counts,
+                        style: AppTypography.textTheme.titleSmall,
+                      ),
+                      if (widget.clusteredJobCount > 1) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          '같은 위치 ${widget.clusteredJobCount}건',
+                          style: AppTypography.textTheme.bodySmall,
+                        ),
+                      ],
+                      if (company != null) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          '회사  $company',
+                          key: DeliveryDetailKeys.company,
+                          style: AppTypography.textTheme.bodyMedium,
+                        ),
+                      ],
+                      if (source != null) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          '소스  $source',
+                          key: DeliveryDetailKeys.source,
+                          style: AppTypography.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (address != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  DsCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('주소', style: AppTypography.textTheme.titleSmall),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          address,
+                          key: DeliveryDetailKeys.address,
+                          style: AppTypography.textTheme.bodyMedium,
+                        ),
+                        if (addressDetail != null) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            addressDetail,
+                            style: AppTypography.textTheme.bodySmall,
+                          ),
+                        ],
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton(
+                          key: DeliveryDetailKeys.addressCopy,
+                          onPressed: _copyAddress,
+                          child: const Text('주소 복사'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (memo != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  DsCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('배송메모', style: AppTypography.textTheme.titleSmall),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(memo, style: AppTypography.textTheme.bodyMedium),
+                      ],
+                    ),
+                  ),
+                ],
+                if (detailHasShipmentRows(point)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  DsCard(
+                    child: Column(
+                      key: DeliveryDetailKeys.shipments,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '배송 물량',
+                          style: AppTypography.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        for (final s in shipments)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.xs,
+                            ),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '${s.sequenceNo}. ',
+                                  style: AppTypography.textTheme.labelLarge,
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    s.trackingCode,
+                                    style: AppTypography.textTheme.bodyMedium,
+                                  ),
+                                ),
+                                Text(
+                                  s.status,
+                                  style: AppTypography.textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (detailShowAccessReveal(point)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  DsCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '출입정보',
+                          style: AppTypography.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton(
+                          key: DeliveryDetailKeys.accessReveal,
+                          onPressed: _accessLoading ? null : _toggleAccess,
+                          child: Text(
+                            _accessPlaintext != null
+                                ? '출입정보 숨기기'
+                                : '출입정보 보기',
+                          ),
+                        ),
+                        if (_accessLoading)
+                          const Padding(
+                            padding: EdgeInsets.only(top: AppSpacing.sm),
+                            child: LinearProgressIndicator(),
+                          ),
+                        if (_accessError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.sm),
+                            child: Text(
+                              _accessError!,
+                              style: AppTypography.textTheme.bodySmall
+                                  ?.copyWith(color: AppColors.danger),
+                            ),
+                          ),
+                        if (_accessPlaintext != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.sm),
+                            child: Semantics(
+                              label: '출입정보 표시됨',
+                              child: Text(
+                                _accessPlaintext!,
+                                key: DeliveryDetailKeys.accessValue,
+                                style: AppTypography.textTheme.titleMedium,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ] else if (detailShowCompletedAccessPolicy(point)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    '완료 배송지는 출입정보를 표시하지 않습니다',
+                    style: AppTypography.textTheme.bodySmall,
+                  ),
+                ],
+                if (detailShowPhoneActions(point)) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  DsCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '고객 연락',
+                          style: AppTypography.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton(
+                          key: DeliveryDetailKeys.phoneReveal,
+                          onPressed: _togglePhone,
+                          child: Text(
+                            _phoneRevealed ? '연락처 숨기기' : '연락처 보기',
+                          ),
+                        ),
+                        if (_phoneRevealed &&
+                            phoneValue != null &&
+                            phoneValue.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.sm),
+                            child: Text(
+                              phoneValue,
+                              key: DeliveryDetailKeys.phoneValue,
+                              style: AppTypography.textTheme.titleMedium,
+                            ),
+                          ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                key: DeliveryDetailKeys.callAction,
+                                onPressed: _dial,
+                                child: const Text('전화'),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: OutlinedButton(
+                                key: DeliveryDetailKeys.smsAction,
+                                onPressed: _sms,
+                                child: const Text('문자'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                if (canNavigate)
+                  DsPrimaryButton(
+                    key: DeliveryDetailKeys.navigate,
+                    label: '길찾기',
+                    onPressed: widget.onNavigate,
+                  ),
+                if (canNavigate && showComplete)
+                  const SizedBox(height: AppSpacing.sm),
+                if (showComplete)
+                  DsPrimaryButton(
+                    key: DeliveryDetailKeys.complete,
+                    label: '배송 완료',
+                    onPressed: widget.onComplete,
+                  ),
+                if (widget.onAdjustPin != null && !completed) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  TextButton(
+                    onPressed: widget.onAdjustPin,
+                    child: const Text('핀 위치 조정'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

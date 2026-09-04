@@ -4,7 +4,7 @@ import '../state/auth_controller.dart';
 import '../state/delivery_session_controller.dart';
 import '../sync/completion_projection_store.dart';
 import '../sync/operation_sync_engine.dart';
-import 'home_screen.dart';
+import 'app_shell.dart';
 import 'login_screen.dart';
 
 /// Binds [OperationSyncEngine] to the signed-in driver (app-scope).
@@ -87,7 +87,7 @@ class _AuthGateState extends State<AuthGate> {
               body: Center(child: CircularProgressIndicator()),
             );
           case AuthViewState.signedIn:
-            return HomeScreen(
+            return AppShell(
               controller: widget.controller,
               sessionController: widget.sessionController,
             );

@@ -53,6 +53,17 @@ export class AddressResolutionService {
     this.geocodeProviders = [this.kakao, this.naver];
   }
 
+  isKakaoConfigured(): boolean {
+    return this.kakao.isConfigured();
+  }
+
+  /**
+   * Interactive Kakao address.json typeahead. Does not run Track A resolution.
+   */
+  searchAddressDocuments(query: string) {
+    return this.kakao.searchAddressDocuments(query);
+  }
+
   getOrchestrationPolicy(): ProviderOrchestrationPolicy {
     const kakaoOn = this.kakao.isConfigured();
     const naverOn = this.naver.isConfigured();

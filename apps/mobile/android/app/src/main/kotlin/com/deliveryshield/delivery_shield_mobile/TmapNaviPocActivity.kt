@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -11,6 +12,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.fragment.app.FragmentManager
 import com.skt.tmap.engine.navigation.SDKManager
 import com.skt.tmap.engine.navigation.network.ndds.CarOilType
@@ -55,6 +59,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
     private var deviceKey: String = ""
     private var initStarted = false
     private var routeRequested = false
+    private var exiting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,9 +71,19 @@ class TmapNaviPocActivity : AppCompatActivity() {
         deviceKey = intent.getStringExtra(EXTRA_DEVICE_KEY)?.trim().orEmpty()
 
         statusView = findViewById(R.id.poc_status)
+        val chrome = findViewById<View>(R.id.poc_chrome)
+        chrome.bringToFront()
+        // Close control was laid out under the StatusBar window (y=23..158 vs statusBars 0..105).
+        // Center taps hit SystemUI, so the ImageButton listener never ran.
+        ViewCompat.setOnApplyWindowInsetsListener(chrome) { view, insets ->
+            val statusBars = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            view.updatePadding(top = statusBars.top)
+            insets
+        }
+        ViewCompat.requestApplyInsets(chrome)
         findViewById<ImageButton>(R.id.btn_close).setOnClickListener {
-            stopDriveQuietly()
-            finish()
+            Log.d(TAG, "close control tapped")
+            exitPoc()
         }
 
         if (apiKey.isEmpty()) {
@@ -110,10 +125,18 @@ class TmapNaviPocActivity : AppCompatActivity() {
             }
 
             override fun onStopNavigation() {
-                runOnUiThread { setStatus("Guidance stopped") }
+                runOnUiThread {
+                    setStatus("Guidance stopped")
+                    if (exiting && !isFinishing) {
+                        finish()
+                    }
+                }
             }
 
-            override fun onTryToStopNavigation(): Boolean = true
+            override fun onTryToStopNavigation(): Boolean {
+                // Let official stopDrive() proceed; host finish() is in exitPoc/onStopNavigation.
+                return true
+            }
 
             override fun onRouteChanged(index: Int) {
                 Log.d(TAG, "onRouteChanged $index")
@@ -214,10 +237,13 @@ class TmapNaviPocActivity : AppCompatActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (!navigationFragment.onBackKeyPressed()) {
-                        stopDriveQuietly()
-                        finish()
+                    Log.d(TAG, "system back")
+                    // Official sample lets SDK consume back and stay in MainActivity.
+                    // Isolated PoC must not trap the user during active guidance.
+                    if (::navigationFragment.isInitialized) {
+                        navigationFragment.onBackKeyPressed()
                     }
+                    exitPoc()
                 }
             },
         )
@@ -359,7 +385,30 @@ class TmapNaviPocActivity : AppCompatActivity() {
         }
     }
 
+    private fun exitPoc() {
+        if (exiting) {
+            if (!isFinishing) {
+                finish()
+            }
+            return
+        }
+        exiting = true
+        Log.d(TAG, "exitPoc")
+        stopDriveQuietly()
+        if (::fragmentManager.isInitialized && ::navigationFragment.isInitialized) {
+            try {
+                fragmentManager.beginTransaction()
+                    .remove(navigationFragment)
+                    .commitNowAllowingStateLoss()
+            } catch (_: Exception) {
+                // Fragment may already be gone
+            }
+        }
+        finish()
+    }
+
     private fun stopDriveQuietly() {
+        if (!::navigationFragment.isInitialized) return
         try {
             navigationFragment.stopDrive()
         } catch (_: Exception) {

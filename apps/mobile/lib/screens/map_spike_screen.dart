@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
+import '../copy/driver_chrome_copy.dart';
 import '../config/device_abi.dart';
 import '../map/delivery_location_pin.dart';
 import '../map/delivery_map_controller.dart';
@@ -13,17 +14,26 @@ import '../map/map_provider_settings.dart';
 import '../map/today_workset_map_adapter.dart';
 import '../map/workset_completion_reconciler.dart';
 import '../map/workset_map_filter.dart';
+import '../map/workset_map_filter_chips.dart';
 import '../models/map_spike_point.dart';
 import '../models/today_workset.dart';
+import '../navigation/point_external_navi.dart';
 import '../services/api_client.dart';
 import '../services/api_exception.dart';
 import '../services/map_spike_service.dart';
 import '../services/today_workset_repository.dart';
 import '../sync/completion_projection_store.dart';
 import '../sync/sync_scope.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
 import '../widgets/delivery_detail_panel.dart';
+import '../widgets/map_selected_point_card.dart';
 import '../widgets/my_location_button.dart';
-import 'complete_delivery_screen.dart';
+import 'app_shell_tabs.dart';
+import 'complete_delivery_data.dart';
+import 'complete_delivery_flow.dart';
+import 'unified_map_keys.dart';
+import 'unified_map_overlay.dart';
 
 enum DeliveryMapDataSource {
   /// Primary: GET /delivery/today
@@ -47,6 +57,7 @@ class MapSpikeScreen extends StatefulWidget {
     this.driverId,
     this.serviceDate,
     this.initialWorkset,
+    this.onSelectTab,
   });
 
   final ApiClient apiClient;
@@ -66,6 +77,9 @@ class MapSpikeScreen extends StatefulWidget {
 
   /// Optional preloaded workset to avoid an extra fetch on first paint.
   final TodayWorkset? initialWorkset;
+
+  /// Optional AppShell tab switch (complete success → 배송 목록).
+  final ValueChanged<int>? onSelectTab;
 
   @override
   State<MapSpikeScreen> createState() => _MapSpikeScreenState();
@@ -96,6 +110,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   TodayWorkset? _workset;
   WorksetMapFilter _filter = WorksetMapFilter.all;
+  bool _detailOpen = false;
   final Set<String> _detailHydratedPointIds = {};
 
   final Map<String, MapSpikePoint> _preOptimisticByPointId = {};
@@ -333,7 +348,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _error = '지도 데이터를 불러오지 못했습니다';
+        _error = DriverChromeCopy.loadMapFailed;
         _loading = false;
         _refreshing = false;
         if (!hadData && !isRefresh) {
@@ -424,6 +439,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     final point = preferred ?? pin.primaryPoint;
     _selectedMarkerId.value = markerId;
     _selectedPointId.value = point.pointId;
+    if (_detailOpen) {
+      setState(() => _detailOpen = false);
+    }
     if (_effectiveSource == DeliveryMapDataSource.today) {
       unawaited(_hydratePointDetail(point.pointId));
     }
@@ -469,6 +487,53 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   void _closePanel() {
     _selectedMarkerId.value = null;
     _selectedPointId.value = null;
+    if (_detailOpen) {
+      setState(() => _detailOpen = false);
+    }
+  }
+
+  Future<void> _navigateToPoint(MapSpikePoint point) async {
+    if (!PointExternalNavi.hasValidDestination(point)) return;
+    final ok = await PointExternalNavi.open(
+      latitude: point.latitude,
+      longitude: point.longitude,
+      name: PointExternalNavi.labelFor(point),
+      preferredProvider: _mapProviderId,
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('길찾기를 열 수 없습니다')),
+      );
+    }
+  }
+
+  DeliveryLatLng? _cameraTarget() {
+    final cameraSource = _pointsById.values.toList(growable: false);
+    if (cameraSource.isNotEmpty) {
+      final first = cameraSource.first;
+      if (cameraSource.length == 1) {
+        return DeliveryLatLng(
+          latitude: first.latitude,
+          longitude: first.longitude,
+        );
+      }
+      final midLat =
+          cameraSource.map((p) => p.latitude).reduce((a, b) => a + b) /
+              cameraSource.length;
+      final midLng =
+          cameraSource.map((p) => p.longitude).reduce((a, b) => a + b) /
+              cameraSource.length;
+      return DeliveryLatLng(latitude: midLat, longitude: midLng);
+    }
+    final snap = _locationCoordinator.locationService.lastSnapshot;
+    if (snap == null) return null;
+    if (!PointExternalNavi.isValidCoordinate(snap.latitude, snap.longitude)) {
+      return null;
+    }
+    return DeliveryLatLng(
+      latitude: snap.latitude,
+      longitude: snap.longitude,
+    );
   }
 
   void _setFilter(WorksetMapFilter filter) {
@@ -539,26 +604,51 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     }
   }
 
+  List<MapSpikePoint> _orderedTodayPoints() {
+    final workset = _workset;
+    if (workset == null) return const [];
+    final out = <MapSpikePoint>[];
+    for (final p in workset.points) {
+      final mapped = _pointsById[p.pointId];
+      if (mapped != null) out.add(mapped);
+    }
+    return out;
+  }
+
+  void _revealPoint(String pointId) {
+    DeliveryLocationPin? pin;
+    for (final p in _pinsByMarkerId.values) {
+      if (p.points.any((x) => x.pointId == pointId)) {
+        pin = p;
+        break;
+      }
+    }
+    if (pin == null) return;
+    _onPinTap(pin.markerId, preferredPointId: pointId);
+    setState(() => _detailOpen = true);
+  }
+
   Future<void> _openComplete(MapSpikePoint point) async {
-    final scope = SyncScope.maybeOf(context);
     final driverId = point.driverId.isNotEmpty
         ? point.driverId
         : (widget.driverId ?? '');
-    final result = await Navigator.of(context).push<Object?>(
-      MaterialPageRoute(
-        builder: (_) => CompleteDeliveryScreen(
-          point: point,
-          driverId: driverId,
-          mapSpikeService: _service,
-          syncEngine: scope?.syncEngine,
-          completionEnqueue: scope?.completionEnqueue,
-          projections: scope?.projections,
-        ),
-      ),
+    final next = nextOpenPointAfter(
+      ordered: _orderedTodayPoints(),
+      currentPointId: point.pointId,
+    );
+    final result = await openCompleteDeliveryScreen(
+      context: context,
+      point: point,
+      mapSpikeService: _service,
+      driverId: driverId,
+      nextPoint: next,
+      onOpenMap: () {},
+      onOpenList: widget.onSelectTab == null ? null : () {},
     );
     if (!mounted) return;
-    final optimistic = result is Map && result['optimistic'] == true;
-    if (result != true && !optimistic) return;
+    final parsed = parseCompleteFlowResult(result);
+    final optimistic = parsed?.queued == true;
+    if (parsed == null || !parsed.applied) return;
 
     if (optimistic) {
       _preOptimisticByPointId[point.pointId] = point;
@@ -587,12 +677,16 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (controller != null && newPin != null) {
       await controller.upsertPin(newPin);
     }
-    if (optimistic && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('배송완료 · 동기화 중')),
-      );
-    }
     _closePanel();
+    if (!mounted) return;
+    if (parsed.action == CompleteNavAction.list) {
+      widget.onSelectTab?.call(AppShellTabs.delivery);
+      return;
+    }
+    if (parsed.action == CompleteNavAction.next &&
+        parsed.nextPointId != null) {
+      _revealPoint(parsed.nextPointId!);
+    }
   }
 
   Future<void> _changeMapProvider(MapProviderId id) async {
@@ -616,167 +710,76 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     }
   }
 
-  List<_FilterChipSpec> _filterChips() {
-    final chips = <_FilterChipSpec>[
-      const _FilterChipSpec(label: '전체', filter: WorksetMapFilter.all),
-    ];
-    final workset = _workset;
-    if (workset == null) return chips;
+  String get _mapTitle => switch (_effectiveSource) {
+        DeliveryMapDataSource.today => '통합 지도',
+        DeliveryMapDataSource.namdong10 => '배송 지도 (남동구 fixture)',
+        DeliveryMapDataSource.singleSpike => '배송 지도 (Spike)',
+      };
 
-    final companyIds = <String?>{};
-    for (final p in workset.points) {
-      companyIds.add(p.companyId);
-    }
-    for (final id in companyIds) {
-      final label = id == null
-          ? '직접추가'
-          : () {
-              final name = workset.companyById(id)?.displayName.trim() ?? '';
-              return name.isNotEmpty ? name : '회사';
-            }();
-      chips.add(
-        _FilterChipSpec(
-          label: label,
-          filter: WorksetMapFilterCompany(id),
-        ),
-      );
-    }
-
-    final seenSource = <String>{};
-    for (final s in workset.sources) {
-      if (!seenSource.add(s.id)) continue;
-      chips.add(
-        _FilterChipSpec(
-          label: s.displayName.isNotEmpty ? s.displayName : 'Source',
-          filter: WorksetMapFilterSource(s.id),
-        ),
-      );
-    }
-
-    if (workset.sources.any((s) => s.isManual)) {
-      chips.add(
-        const _FilterChipSpec(
-          label: '직접추가',
-          filter: WorksetMapFilterManual(),
-        ),
-      );
-    }
-    return chips;
+  UnifiedMapOverlay _overlay({required bool stale}) {
+    final today = _effectiveSource == DeliveryMapDataSource.today;
+    final summary = _workset?.summary;
+    return UnifiedMapOverlay(
+      title: _mapTitle,
+      showSummary: today && _workset != null,
+      totalPoints: summary?.totalPoints ?? 0,
+      completedPoints: summary?.completedPoints ?? 0,
+      remainingPoints: summary?.remainingPoints ?? 0,
+      filters: today
+          ? WorksetMapFilterChips.fromWorkset(_workset)
+          : const [],
+      selectedFilter: _filter,
+      onFilterSelected: today ? _setFilter : null,
+      onRefresh: () => _load(isRefresh: true),
+      refreshing: _refreshing,
+      mapProviderId: _mapProviderId,
+      onProviderSelected: _changeMapProvider,
+      showBack: ModalRoute.of(context)?.canPop ?? false,
+      onBack: () => Navigator.of(context).maybePop(),
+      stale: stale,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final title = switch (_effectiveSource) {
-      DeliveryMapDataSource.today => '오늘의 배송 지도',
-      DeliveryMapDataSource.namdong10 => '배송 지도 (남동구 fixture)',
-      DeliveryMapDataSource.singleSpike => '배송 지도 (Spike)',
-    };
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        actions: [
-          if (_refreshing)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            )
-          else
-            IconButton(
-              tooltip: '새로고침',
-              onPressed: () => _load(isRefresh: true),
-              icon: const Icon(Icons.refresh),
-            ),
-          PopupMenuButton<MapProviderId>(
-            tooltip: '지도 제공자',
-            initialValue: _mapProviderId,
-            onSelected: _changeMapProvider,
-            itemBuilder: (context) => [
-              for (final id in MapProviderId.values)
-                CheckedPopupMenuItem(
-                  value: id,
-                  checked: id == _mapProviderId,
-                  child: Text(id.displayLabel),
-                ),
-            ],
-            icon: const Icon(Icons.layers_outlined),
-          ),
-        ],
-      ),
+      backgroundColor: AppColors.background,
       body: _buildBody(),
     );
   }
 
   Widget _buildBody() {
+    final stale = _error != null && _pointsById.isNotEmpty;
+    final overlay = _overlay(stale: stale);
+
     if (_loading && _pointsById.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          overlay,
+          const MapLoadingPanel(),
+        ],
+      );
     }
     if (_error != null && _pointsById.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: () => _load(isRefresh: false),
-                child: const Text('다시 시도'),
-              ),
-            ],
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          overlay,
+          MapErrorPanel(
+            message: _error!,
+            onRetry: () => _load(isRefresh: false),
           ),
-        ),
+        ],
       );
     }
 
     final pins = _pinsByMarkerId.values.toList(growable: false);
-    if (pins.isEmpty && !_loading) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _effectiveSource == DeliveryMapDataSource.today
-                    ? '오늘 배정된 배송이 없습니다.'
-                    : '표시할 배송 핀이 없습니다',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: () => _load(isRefresh: true),
-                child: const Text('새로고침'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final cameraSource = _pointsById.values.toList(growable: false);
-    if (cameraSource.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final first = cameraSource.first;
-    final midLat =
-        cameraSource.map((p) => p.latitude).reduce((a, b) => a + b) /
-            cameraSource.length;
-    final midLng =
-        cameraSource.map((p) => p.longitude).reduce((a, b) => a + b) /
-            cameraSource.length;
-    final initial = cameraSource.length > 1
-        ? DeliveryLatLng(latitude: midLat, longitude: midLng)
-        : DeliveryLatLng(
-            latitude: first.latitude,
-            longitude: first.longitude,
-          );
+    final initial = _cameraTarget() ??
+        const DeliveryLatLng(
+          latitude: 37.5665,
+          longitude: 126.9780,
+        );
 
     return Stack(
       fit: StackFit.expand,
@@ -789,75 +792,26 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           onPinTap: _onPinTap,
           onReady: _onMapReady,
         ),
-        if (_effectiveSource == DeliveryMapDataSource.today)
-          Align(
-            alignment: Alignment.topLeft,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final chip in _filterChips())
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: FilterChip(
-                            label: Text(chip.label),
-                            selected: _filter == chip.filter,
-                            onSelected: (_) => _setFilter(chip.filter),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        if (_error != null && _pointsById.isNotEmpty)
-          Align(
-            alignment: Alignment.topCenter,
-            child: SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  top: _effectiveSource == DeliveryMapDataSource.today
-                      ? 52
-                      : 12,
-                  left: 12,
-                  right: 12,
-                ),
-                child: Material(
-                  elevation: 2,
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    child: Text(
-                      '최신 동기화 실패 · 이전 데이터 표시 중',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        overlay,
         ValueListenableBuilder<bool>(
           valueListenable: _pinAdjustMode,
           builder: (context, adjusting, _) {
-            if (adjusting) return const SizedBox.shrink();
+            if (adjusting || _detailOpen) return const SizedBox.shrink();
             return ValueListenableBuilder<String?>(
               valueListenable: _selectedMarkerId,
               builder: (context, selectedId, _) {
-                if (selectedId != null) return const SizedBox.shrink();
                 return Align(
-                  alignment: Alignment.centerRight,
+                  alignment: Alignment.bottomRight,
                   child: SafeArea(
                     child: Padding(
-                      padding: const EdgeInsets.only(right: 12, top: 72),
+                      padding: EdgeInsets.only(
+                        right: AppSpacing.md,
+                        bottom: selectedId != null
+                            ? 176
+                            : AppSpacing.lg,
+                      ),
                       child: MyLocationButton(
+                        key: UnifiedMapKeys.currentLocation,
                         followActive: _locationCoordinator.followEnabled,
                         enabled: !_locationCoordinator.permissionDenied,
                         onPressed: () =>
@@ -873,43 +827,21 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         ValueListenableBuilder<bool>(
           valueListenable: _pinAdjustMode,
           builder: (context, adjusting, _) {
-            if (!adjusting) {
-              return ValueListenableBuilder<String?>(
-                valueListenable: _selectedMarkerId,
-                builder: (context, selectedId, _) {
-                  if (selectedId != null) return const SizedBox.shrink();
-                  return Align(
-                    alignment: Alignment.topCenter,
-                    child: SafeArea(
-                      child: Padding(
-                        padding: EdgeInsets.only(
-                          top: _effectiveSource == DeliveryMapDataSource.today
-                              ? 56
-                              : 12,
-                        ),
-                        child: _HintChip(
-                          text:
-                              '${_mapProviderId.displayLabel} · 핀을 탭하면 상세 정보',
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              );
-            }
+            if (!adjusting) return const SizedBox.shrink();
             return Align(
               alignment: Alignment.bottomCenter,
               child: Material(
+                color: AppColors.surfaceElevated,
                 elevation: 8,
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(AppSpacing.md),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const Text('지도를 이동해 실제 배송 위치를 맞춘 뒤 저장하세요.'),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: AppSpacing.sm),
                         Row(
                           children: [
                             Expanded(
@@ -921,7 +853,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                                 child: const Text('취소'),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: AppSpacing.sm),
                             Expanded(
                               child: FilledButton(
                                 onPressed: _savePinAdjust,
@@ -955,33 +887,52 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                       (p) => p.pointId == selectedPointId,
                       orElse: () => pin.primaryPoint,
                     );
+                    final canNavigate =
+                        PointExternalNavi.hasValidDestination(point);
                     return Align(
                       alignment: Alignment.bottomCenter,
-                      child: DeliveryDetailPanel(
-                        point: point,
-                        totalQuantity: point.quantity,
-                        clusteredJobCount: pin.points.length,
-                        clusterPoints:
-                            pin.isCluster ? pin.points : null,
-                        onSelectClusterPoint: pin.isCluster
-                            ? (p) {
-                                _selectedPointId.value = p.pointId;
-                                if (_effectiveSource ==
-                                    DeliveryMapDataSource.today) {
-                                  unawaited(_hydratePointDetail(p.pointId));
-                                }
-                              }
-                            : null,
-                        onClose: _closePanel,
-                        onAdjustPin: point.isCompleted
-                            ? null
-                            : () => _startPinAdjust(point),
-                        onComplete: point.isCompleted
-                            ? null
-                            : () => _openComplete(point),
-                        onRevealAccessInfo: (id) =>
-                            _service.fetchAccessInfo(id),
-                      ),
+                      child: _detailOpen
+                          ? DeliveryDetailPanel(
+                              point: point,
+                              totalQuantity: point.quantity,
+                              clusteredJobCount: pin.points.length,
+                              clusterPoints:
+                                  pin.isCluster ? pin.points : null,
+                              onSelectClusterPoint: pin.isCluster
+                                  ? (p) {
+                                      _selectedPointId.value = p.pointId;
+                                      if (_effectiveSource ==
+                                          DeliveryMapDataSource.today) {
+                                        unawaited(
+                                          _hydratePointDetail(p.pointId),
+                                        );
+                                      }
+                                    }
+                                  : null,
+                              onClose: _closePanel,
+                              onNavigate: canNavigate
+                                  ? () => _navigateToPoint(point)
+                                  : null,
+                              onAdjustPin: point.isCompleted
+                                  ? null
+                                  : () => _startPinAdjust(point),
+                              onComplete: point.isCompleted
+                                  ? null
+                                  : () => _openComplete(point),
+                              onRevealAccessInfo: (id) =>
+                                  _service.fetchAccessInfo(id),
+                            )
+                          : MapSelectedPointCard(
+                              point: point,
+                              clusteredJobCount: pin.points.length,
+                              onClose: _closePanel,
+                              onNavigate: canNavigate
+                                  ? () => _navigateToPoint(point)
+                                  : null,
+                              onOpenDetail: () {
+                                setState(() => _detailOpen = true);
+                              },
+                            ),
                     );
                   },
                 );
@@ -990,32 +941,6 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           },
         ),
       ],
-    );
-  }
-}
-
-class _FilterChipSpec {
-  const _FilterChipSpec({required this.label, required this.filter});
-
-  final String label;
-  final WorksetMapFilter filter;
-}
-
-class _HintChip extends StatelessWidget {
-  const _HintChip({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 2,
-      borderRadius: BorderRadius.circular(20),
-      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.95),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Text(text, style: Theme.of(context).textTheme.bodySmall),
-      ),
     );
   }
 }

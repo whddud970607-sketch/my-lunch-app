@@ -53,6 +53,7 @@ import { IMPORT_COMMITTER, IMPORT_CONTEXT_RESOLVER } from "./import.tokens";
     IMPORT_COMMITTER,
     IMPORT_CONTEXT_RESOLVER,
     SupabaseImportContextAuthority,
+    DeliverySourceRepository,
   ],
 })
 export class ImportModule {}

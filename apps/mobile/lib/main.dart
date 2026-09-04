@@ -7,6 +7,7 @@ import 'location/driver_location_service.dart';
 import 'map/naver_map_bootstrap.dart';
 import 'map/naver_map_feature.dart';
 import 'screens/auth_gate.dart';
+import 'theme/app_theme.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/delivery_session_service.dart';
@@ -138,10 +139,7 @@ class DeliveryShieldApp extends StatelessWidget {
       completionEnqueue: completionEnqueue,
       child: MaterialApp(
         title: 'Delivery Shield',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F6B4C)),
-          useMaterial3: true,
-        ),
+        theme: AppTheme.dark(),
         home: AuthGate(
           controller: controller,
           sessionController: sessionController,
@@ -161,6 +159,7 @@ class _BootErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: AppTheme.dark(),
       home: Scaffold(
         body: Center(
           child: Padding(

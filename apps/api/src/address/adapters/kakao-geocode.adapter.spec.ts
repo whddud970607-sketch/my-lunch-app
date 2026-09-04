@@ -92,4 +92,69 @@ describe("KakaoGeocodeAdapter", () => {
     expect(candidates[0].coordinateType).toBe("BUILDING_CANDIDATE");
     expect(candidates[0].sourceType).toBe("address");
   });
+
+  it("searchAddressDocuments maps all public address docs", async () => {
+    const fetchFn = jest.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        documents: [
+          {
+            x: "126.74",
+            y: "37.42",
+            address_name: "인천광역시 남동구 서창남순환로 190-100",
+            road_address: {
+              address_name: "인천광역시 남동구 서창남순환로 190-100",
+              building_name: "에코에비뉴",
+            },
+            address: { address_name: "인천광역시 남동구 서창동 538" },
+          },
+          {
+            x: "126.75",
+            y: "37.43",
+            road_address: {
+              address_name: "인천광역시 남동구 서창남순환로 191",
+              building_name: "",
+            },
+            address: { address_name: "인천광역시 남동구 서창동 540" },
+          },
+        ],
+      }),
+    });
+
+    const adapter = new KakaoGeocodeAdapter("test-key", fetchFn);
+    const hits = await adapter.searchAddressDocuments("서창남순환로");
+    expect(hits).toHaveLength(2);
+    expect(hits[0].roadAddress).toBe(
+      "인천광역시 남동구 서창남순환로 190-100",
+    );
+    expect(hits[0].jibunAddress).toBe("인천광역시 남동구 서창동 538");
+    expect(hits[0].buildingName).toBe("에코에비뉴");
+    expect(hits[0].latitude).toBe(37.42);
+    expect(hits[1].buildingName).toBeNull();
+    expect(JSON.stringify(hits)).not.toMatch(/phone|customer|secret/i);
+  });
+
+  it("searchAddressDocuments keeps resolveCandidates on first document only", async () => {
+    const fetchFn = jest.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        documents: [
+          {
+            x: "126.74",
+            y: "37.42",
+            address_type: "ROAD_ADDR",
+            road_address: { building_name: "에코에비뉴" },
+          },
+        ],
+      }),
+    });
+    const adapter = new KakaoGeocodeAdapter("test-key", fetchFn);
+    const parsed: ParsedAddress = {
+      ...ECO_PARSED,
+      dong: null,
+    };
+    const candidates = await adapter.resolveCandidates(parsed);
+    expect(candidates).toHaveLength(1);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
 });

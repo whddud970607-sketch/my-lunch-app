@@ -29,6 +29,12 @@ import {
   parseServiceDateParam,
   TodayWorksetService,
 } from "./today-workset.service";
+import { DeliveryAddressSearchService } from "./delivery-address-search.service";
+import { DeliveryManualAddressSuggestService } from "./delivery-manual-address-suggest.service";
+import {
+  DeliveryManualRegisterService,
+  type ManualRegisterRequest,
+} from "./delivery-manual-register.service";
 import {
   fixtureGroupFromKey,
   mapPointStatusLabel,
@@ -50,6 +56,9 @@ export class DeliveriesController {
     private readonly accessCrypto: AccessInfoCryptoService,
     private readonly completion: DeliveryCompletionService,
     private readonly todayWorkset: TodayWorksetService,
+    private readonly addressSearch: DeliveryAddressSearchService,
+    private readonly manualSuggest: DeliveryManualAddressSuggestService,
+    private readonly manualRegister: DeliveryManualRegisterService,
   ) {}
 
   /**
@@ -74,6 +83,66 @@ export class DeliveriesController {
     return this.todayWorkset.getToday(req.supabaseUser, {
       driverId,
       serviceDate,
+    });
+  }
+
+  /**
+   * Authorized Today Point search (displayLabel + address PII the driver may read).
+   * driver_id query is ignored; JWT requireDriverId() is the only authority.
+   */
+  @Get("today/search")
+  @Roles("driver")
+  async searchToday(
+    @CurrentUser() user: AuthUser,
+    @Req() req: { supabaseUser: SupabaseClient },
+    @Query("q") q?: string,
+    @Query("date") date?: string,
+  ) {
+    const driverId = this.scope.forUser(user).requireDriverId();
+    let serviceDate: string;
+    try {
+      serviceDate = parseServiceDateParam(date);
+    } catch {
+      throw new BadRequestException("date must be YYYY-MM-DD");
+    }
+    return this.addressSearch.searchToday(req.supabaseUser, {
+      driverId,
+      serviceDate,
+      query: q ?? "",
+    });
+  }
+
+  /**
+   * Public address candidates for NEW manual registration.
+   * Not GET /delivery/today/search (existing assigned Points).
+   */
+  @Get("manual/address/suggest")
+  @Roles("driver")
+  async suggestManualAddress(
+    @CurrentUser() user: AuthUser,
+    @Query("q") q?: string,
+  ) {
+    this.scope.forUser(user).requireDriverId();
+    return this.manualSuggest.suggest(q ?? "");
+  }
+
+  /**
+   * Create a new operational destination from a selected public address.
+   * Ensures driver_manual source server-side. Flutter does not send sourceId.
+   */
+  @Post("manual/register")
+  @Roles("driver")
+  async registerManualAddress(
+    @CurrentUser() user: AuthUser,
+    @Req() req: { supabaseUser: SupabaseClient },
+    @Body() body: ManualRegisterRequest,
+  ) {
+    const driverId = this.scope.forUser(user).requireDriverId();
+    const companyIds = user.companyId ? [user.companyId] : [];
+    return this.manualRegister.register(req.supabaseUser, {
+      driverId,
+      companyIds,
+      body,
     });
   }
 

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+import '../theme/app_radius.dart';
+import '../theme/app_spacing.dart';
+
 /// Map overlay: re-center on driver GPS and enable follow mode.
 class MyLocationButton extends StatelessWidget {
   const MyLocationButton({
@@ -15,23 +19,20 @@ class MyLocationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Material(
       elevation: 4,
-      borderRadius: BorderRadius.circular(12),
-      color: colorScheme.surface.withValues(alpha: 0.95),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      color: AppColors.surfaceElevated,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: enabled ? onPressed : null,
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(AppSpacing.md),
           child: Icon(
             followActive ? Icons.my_location : Icons.location_searching,
             color: enabled
-                ? (followActive
-                    ? colorScheme.primary
-                    : colorScheme.onSurface)
-                : colorScheme.onSurface.withValues(alpha: 0.38),
+                ? (followActive ? AppColors.primary : AppColors.textPrimary)
+                : AppColors.textSecondary,
           ),
         ),
       ),

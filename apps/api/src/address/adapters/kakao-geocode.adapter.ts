@@ -10,7 +10,17 @@ type KakaoAddressDoc = {
   y?: string;
   address_name?: string;
   address_type?: string;
-  road_address?: { building_name?: string };
+  road_address?: { address_name?: string; building_name?: string };
+  address?: { address_name?: string };
+};
+
+/** Public interactive-search hit. No customer PII. */
+export type KakaoAddressSearchDocument = {
+  roadAddress: string | null;
+  jibunAddress: string | null;
+  buildingName: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 type KakaoKeywordDoc = {
@@ -40,6 +50,31 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
 
   isConfigured(): boolean {
     return Boolean(this.restApiKey?.trim());
+  }
+
+  /**
+   * Interactive address.json typeahead (all documents).
+   * Does not change [resolveCandidates] first-document geocode behavior.
+   */
+  async searchAddressDocuments(
+    query: string,
+    opts?: { size?: number },
+  ): Promise<KakaoAddressSearchDocument[]> {
+    if (!this.isConfigured()) {
+      return [];
+    }
+    const restKey = this.restApiKey!.trim();
+    const size = Math.min(Math.max(opts?.size ?? 15, 1), 30);
+    const body = await this.fetchAddressDocuments(restKey, query, size);
+    if (body.httpStatus !== 200) {
+      throw new Error(
+        body.message ||
+          `kakao address search failed http=${body.httpStatus} type=${body.errorType}`,
+      );
+    }
+    return (body.documents ?? [])
+      .map((doc) => this.mapSearchDocument(doc))
+      .filter((hit) => hit.roadAddress || hit.jibunAddress);
   }
 
   async resolveCandidates(parsed: ParsedAddress): Promise<CoordinateCandidate[]> {
@@ -140,9 +175,33 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
     };
   }
 
-  private async kakaoAddress(restKey: string, query: string) {
+  private mapSearchDocument(doc: KakaoAddressDoc): KakaoAddressSearchDocument {
+    const lat = doc.y != null && doc.y !== "" ? Number(doc.y) : NaN;
+    const lng = doc.x != null && doc.x !== "" ? Number(doc.x) : NaN;
+    const road = emptyToNull(doc.road_address?.address_name);
+    const jibun = emptyToNull(doc.address?.address_name);
+    return {
+      roadAddress: road,
+      jibunAddress: jibun,
+      buildingName: emptyToNull(doc.road_address?.building_name),
+      latitude: Number.isFinite(lat) ? lat : null,
+      longitude: Number.isFinite(lng) ? lng : null,
+    };
+  }
+
+  private async fetchAddressDocuments(
+    restKey: string,
+    query: string,
+    size: number,
+  ): Promise<{
+    documents?: KakaoAddressDoc[];
+    message?: string;
+    errorType?: string;
+    httpStatus: number;
+  }> {
     const url = new URL("https://dapi.kakao.com/v2/local/search/address.json");
     url.searchParams.set("query", query);
+    url.searchParams.set("size", String(size));
     const res = await this.fetchFn(url.toString(), {
       headers: { Authorization: `KakaoAK ${restKey}` },
     });
@@ -151,11 +210,21 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
       message?: string;
       errorType?: string;
     } | null;
-    const doc = body?.documents?.[0];
-    if (res.status !== 200 || !doc?.x || !doc?.y) {
+    return {
+      documents: body?.documents,
+      message: body?.message,
+      errorType: body?.errorType,
+      httpStatus: res.status,
+    };
+  }
+
+  private async kakaoAddress(restKey: string, query: string) {
+    const body = await this.fetchAddressDocuments(restKey, query, 1);
+    const doc = body.documents?.[0];
+    if (body.httpStatus !== 200 || !doc?.x || !doc?.y) {
       throw new Error(
-        body?.message ||
-          `kakao address geocode failed http=${res.status} type=${body?.errorType}`,
+        body.message ||
+          `kakao address geocode failed http=${body.httpStatus} type=${body.errorType}`,
       );
     }
     return {
@@ -190,4 +259,10 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
     }
     return body?.documents ?? [];
   }
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const t = value.trim();
+  return t === "" ? null : t;
 }
