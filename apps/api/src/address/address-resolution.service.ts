@@ -64,6 +64,21 @@ export class AddressResolutionService {
     return this.kakao.searchAddressDocuments(query);
   }
 
+  lookupApartmentDongCoords(args: {
+    buildingName: string | null;
+    dong: string | null;
+    latitude: number;
+    longitude: number;
+  }) {
+    if (!args.buildingName || !args.dong) return Promise.resolve(null);
+    return this.kakao.lookupApartmentDong({
+      buildingName: args.buildingName,
+      dong: args.dong,
+      latitude: args.latitude,
+      longitude: args.longitude,
+    });
+  }
+
   getOrchestrationPolicy(): ProviderOrchestrationPolicy {
     const kakaoOn = this.kakao.isConfigured();
     const naverOn = this.naver.isConfigured();

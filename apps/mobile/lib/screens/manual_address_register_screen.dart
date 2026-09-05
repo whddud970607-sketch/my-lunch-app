@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../copy/driver_chrome_copy.dart';
 import '../models/manual_address_candidate.dart';
 import '../services/api_exception.dart';
+import '../services/invoice_evidence_image.dart';
 import '../services/manual_address_repository.dart';
 import '../theme/app_spacing.dart';
 import '../widgets/ds_primary_button.dart';
 import 'manual_address_keys.dart';
 import 'manual_address_register_data.dart';
+import 'manual_pin_adjust_screen.dart';
 
 enum _ManualPhase { search, confirm }
 
@@ -21,12 +25,18 @@ class ManualAddressRegisterScreen extends StatefulWidget {
     required this.repository,
     this.serviceDate,
     this.idempotency,
+    this.reason = ManualRegisterReason.manualEntry,
+    this.invoiceEvidenceRequirement,
+    this.pickInvoice,
     this.debounce = const Duration(milliseconds: 400),
   });
 
   final ManualAddressRepository repository;
   final String? serviceDate;
   final ManualRegisterIdempotency? idempotency;
+  final ManualRegisterReason reason;
+  final InvoiceEvidenceRequirement? invoiceEvidenceRequirement;
+  final Future<InvoiceEvidenceDraft?> Function(ImageSource source)? pickInvoice;
   final Duration debounce;
 
   @override
@@ -44,6 +54,9 @@ class _ManualAddressRegisterScreenState
   final _unitController = TextEditingController();
   final _quantityController =
       TextEditingController(text: '${defaultManualQuantity()}');
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _picker = ImagePicker();
 
   _ManualPhase _phase = _ManualPhase.search;
   _SearchPhase _searchPhase = _SearchPhase.idle;
@@ -54,6 +67,8 @@ class _ManualAddressRegisterScreenState
   String? _submitError;
   bool _offline = false;
   ManualRegisterResult? _success;
+  ManualPinSelection? _pin;
+  InvoiceEvidenceDraft _invoice = const InvoiceEvidenceDraft();
   Timer? _debounce;
 
   @override
@@ -64,6 +79,8 @@ class _ManualAddressRegisterScreenState
     _dongController.dispose();
     _unitController.dispose();
     _quantityController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -102,12 +119,94 @@ class _ManualAddressRegisterScreenState
   }
 
   void _selectCandidate(ManualAddressCandidate hit) {
+    final base = manualRegisterCoordinateFields(hit);
     setState(() {
       _selected = hit;
       _phase = _ManualPhase.confirm;
       _submitError = null;
       _success = null;
+      _pin = base.isEmpty
+          ? null
+          : ManualPinSelection(
+              latitude: base['latitude']!,
+              longitude: base['longitude']!,
+              source: ManualPinSource.baseAddress,
+            );
     });
+  }
+
+  Future<void> _openPinAdjust() async {
+    final current = _pin;
+    if (current == null) return;
+    final next = await Navigator.of(context).push<ManualPinSelection>(
+      MaterialPageRoute(
+        builder: (_) => ManualPinAdjustScreen(initial: current),
+      ),
+    );
+    if (!mounted || next == null) return;
+    setState(() => _pin = next);
+  }
+
+  Future<void> _captureInvoice(ImageSource source) async {
+    try {
+      final injected = widget.pickInvoice;
+      if (injected != null) {
+        final draft = await injected(source);
+        if (!mounted || draft == null || !draft.hasLocalImage) return;
+        _applyInvoiceBytes(draft.bytes!, draft.capturedAt ?? DateTime.now());
+        return;
+      }
+      final shot = await _picker.pickImage(
+        source: source,
+        imageQuality: invoiceEvidenceJpegQuality,
+        maxWidth: invoiceEvidenceMaxWidth.toDouble(),
+      );
+      if (!mounted || shot == null) return;
+      _applyInvoiceBytes(await shot.readAsBytes(), DateTime.now());
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _submitError = DriverChromeCopy.manualInvoiceRejected;
+      });
+    }
+  }
+
+  void _applyInvoiceBytes(List<int> raw, DateTime capturedAt) {
+    try {
+      final prepared = prepareInvoiceEvidenceBytes(raw);
+      setState(() {
+        _submitError = null;
+        _invoice = InvoiceEvidenceDraft(
+          bytes: prepared.bytes,
+          capturedAt: capturedAt,
+          status: InvoiceEvidenceUploadStatus.ready,
+        );
+      });
+    } on InvoiceEvidenceImageException {
+      setState(() {
+        _submitError = DriverChromeCopy.manualInvoiceRejected;
+      });
+    }
+  }
+
+  void _removeInvoice() {
+    setState(() {
+      _invoice = const InvoiceEvidenceDraft();
+    });
+  }
+
+  String _invoiceStatusLabel() {
+    switch (_invoice.status) {
+      case InvoiceEvidenceUploadStatus.uploading:
+        return DriverChromeCopy.manualInvoiceUploading;
+      case InvoiceEvidenceUploadStatus.uploaded:
+        return DriverChromeCopy.manualInvoiceUploaded;
+      case InvoiceEvidenceUploadStatus.failed:
+        return DriverChromeCopy.manualInvoiceUploadFailed;
+      case InvoiceEvidenceUploadStatus.ready:
+      case InvoiceEvidenceUploadStatus.none:
+        return DriverChromeCopy.manualInvoiceCaptured;
+    }
   }
 
   Future<void> _submit() async {
@@ -135,16 +234,28 @@ class _ManualAddressRegisterScreenState
         detailAddress: _detailController.text.trim(),
         dong: _dongController.text.trim(),
         unit: _unitController.text.trim(),
+        recipientName: _nameController.text,
+        recipientPhone: _phoneController.text,
+        pin: _pin,
         quantity: qty,
         serviceDate: widget.serviceDate,
+        reason: widget.reason,
       );
       if (!mounted) return;
       if (result.ok &&
           (result.resultCode == 'applied' || result.resultCode == 'duplicate')) {
+        var evidenceFailed = false;
+        if (_invoice.hasLocalImage && result.pointId != null) {
+          evidenceFailed = !await _uploadEvidence(result.pointId!);
+          if (!mounted) return;
+        }
         setState(() {
           _submitting = false;
           _success = result;
         });
+        if (evidenceFailed) {
+          return;
+        }
         if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop(result);
         }
@@ -172,6 +283,77 @@ class _ManualAddressRegisterScreenState
         _offline = offline;
         _submitError = manualRegisterErrorMessage(e);
       });
+    }
+  }
+
+  Future<bool> _uploadEvidence(String pointId) async {
+    final bytes = _invoice.bytes;
+    if (bytes == null || bytes.isEmpty) return true;
+    setState(() {
+      _invoice = InvoiceEvidenceDraft(
+        bytes: bytes,
+        capturedAt: _invoice.capturedAt,
+        status: InvoiceEvidenceUploadStatus.uploading,
+      );
+    });
+    try {
+      final uploaded = await widget.repository.uploadInvoiceEvidence(
+        pointId: pointId,
+        bytes: bytes,
+        capturedAt: _invoice.capturedAt,
+        reason: widget.reason,
+      );
+      if (!mounted) return uploaded.ok;
+      setState(() {
+        _invoice = InvoiceEvidenceDraft(
+          bytes: bytes,
+          capturedAt: _invoice.capturedAt,
+          status: uploaded.ok
+              ? InvoiceEvidenceUploadStatus.uploaded
+              : InvoiceEvidenceUploadStatus.failed,
+        );
+        if (!uploaded.ok) {
+          _submitError = DriverChromeCopy.manualInvoiceUploadFailed;
+        }
+      });
+      return uploaded.ok;
+    } on ApiException catch (e) {
+      if (!mounted) return false;
+      setState(() {
+        _invoice = InvoiceEvidenceDraft(
+          bytes: bytes,
+          capturedAt: _invoice.capturedAt,
+          status: InvoiceEvidenceUploadStatus.failed,
+        );
+        _submitError = manualRegisterErrorMessage(e);
+      });
+      return false;
+    } catch (e) {
+      if (!mounted) return false;
+      setState(() {
+        _invoice = InvoiceEvidenceDraft(
+          bytes: bytes,
+          capturedAt: _invoice.capturedAt,
+          status: InvoiceEvidenceUploadStatus.failed,
+        );
+        _submitError = isOfflineManualFailure(e)
+            ? DriverChromeCopy.manualOffline
+            : DriverChromeCopy.manualInvoiceUploadFailed;
+      });
+      return false;
+    }
+  }
+
+  Future<void> _retryEvidence() async {
+    final pointId = _success?.pointId;
+    if (pointId == null || _invoice.status == InvoiceEvidenceUploadStatus.uploading) {
+      return;
+    }
+    setState(() => _submitError = null);
+    final ok = await _uploadEvidence(pointId);
+    if (!mounted || !ok) return;
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop(_success);
     }
   }
 
@@ -279,6 +461,8 @@ class _ManualAddressRegisterScreenState
     final selected = _selected;
     if (selected == null) return const SizedBox.shrink();
     if (_success != null) {
+      final evidenceFailed =
+          _invoice.status == InvoiceEvidenceUploadStatus.failed;
       return Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
@@ -288,6 +472,22 @@ class _ManualAddressRegisterScreenState
               DriverChromeCopy.manualRegisterSuccess,
               key: ManualAddressKeys.success,
             ),
+            if (evidenceFailed) ...[
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                _submitError ?? DriverChromeCopy.manualInvoiceUploadFailed,
+                key: ManualAddressKeys.invoiceStatus,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              DsPrimaryButton(
+                key: ManualAddressKeys.invoiceRetry,
+                label: DriverChromeCopy.manualInvoiceRetry,
+                busy: _invoice.status == InvoiceEvidenceUploadStatus.uploading,
+                onPressed: _invoice.status == InvoiceEvidenceUploadStatus.uploading
+                    ? null
+                    : _retryEvidence,
+              ),
+            ],
             const SizedBox(height: AppSpacing.lg),
             DsPrimaryButton(
               label: DriverChromeCopy.openDeliveryList,
@@ -344,6 +544,104 @@ class _ManualAddressRegisterScreenState
             labelText: DriverChromeCopy.manualQuantity,
           ),
         ),
+        const SizedBox(height: AppSpacing.md),
+        TextField(
+          key: ManualAddressKeys.recipientNameField,
+          controller: _nameController,
+          maxLength: maxManualRecipientNameLength,
+          decoration: const InputDecoration(
+            labelText: DriverChromeCopy.manualRecipientName,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        TextField(
+          key: ManualAddressKeys.recipientPhoneField,
+          controller: _phoneController,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: DriverChromeCopy.manualRecipientPhone,
+          ),
+        ),
+        if (_pin != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton(
+            key: ManualAddressKeys.pinAdjustButton,
+            onPressed: _submitting ? null : _openPinAdjust,
+            child: const Text(DriverChromeCopy.manualPinAdjust),
+          ),
+          Text(
+            _pin!.source == ManualPinSource.manualAdjust
+                ? DriverChromeCopy.manualPinConfirm
+                : DriverChromeCopy.manualPinHint,
+          ),
+        ],
+        if (showInvoiceEvidenceSection(
+          reason: widget.reason,
+          requirement: widget.invoiceEvidenceRequirement ??
+              invoiceEvidenceRequirementFor(widget.reason),
+        )) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            DriverChromeCopy.manualInvoiceEvidenceTitle,
+            key: ManualAddressKeys.invoiceEvidence,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(DriverChromeCopy.manualInvoiceEvidenceHint),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              TextButton(
+                onPressed: _submitting
+                    ? null
+                    : () => _captureInvoice(ImageSource.camera),
+                child: const Text(DriverChromeCopy.manualInvoiceCapture),
+              ),
+              TextButton(
+                onPressed: _submitting
+                    ? null
+                    : () => _captureInvoice(ImageSource.gallery),
+                child: const Text(DriverChromeCopy.manualInvoiceGallery),
+              ),
+            ],
+          ),
+          if (_invoice.hasLocalImage) ...[
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              key: ManualAddressKeys.invoicePreview,
+              height: 160,
+              child: Image.memory(
+                Uint8List.fromList(_invoice.bytes!),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const ColoredBox(
+                  color: Color(0xFF2A2A2A),
+                  child: Center(child: Icon(Icons.receipt_long)),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _invoiceStatusLabel(),
+              key: ManualAddressKeys.invoiceStatus,
+            ),
+            Row(
+              children: [
+                TextButton(
+                  key: ManualAddressKeys.invoiceRetake,
+                  onPressed: _submitting
+                      ? null
+                      : () => _captureInvoice(ImageSource.camera),
+                  child: const Text(DriverChromeCopy.manualInvoiceRetake),
+                ),
+                TextButton(
+                  key: ManualAddressKeys.invoiceRemove,
+                  onPressed: _submitting ? null : _removeInvoice,
+                  child: const Text(DriverChromeCopy.manualInvoiceRemove),
+                ),
+              ],
+            ),
+          ],
+        ],
         const SizedBox(height: AppSpacing.lg),
         if (_submitError != null)
           Text(

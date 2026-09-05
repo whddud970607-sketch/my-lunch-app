@@ -77,6 +77,44 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
       .filter((hit) => hit.roadAddress || hit.jibunAddress);
   }
 
+  /**
+   * Keyword lookup for an apartment dong near a base address pin.
+   * Returns coords only. Does not log the query or place name.
+   */
+  async lookupApartmentDong(args: {
+    buildingName: string;
+    dong: string;
+    latitude: number;
+    longitude: number;
+  }): Promise<{ latitude: number; longitude: number } | null> {
+    if (!this.isConfigured()) return null;
+    const building = args.buildingName.trim();
+    const dong = args.dong.replace(/동$/u, "").trim();
+    if (!building || !dong) return null;
+    if (!Number.isFinite(args.latitude) || !Number.isFinite(args.longitude)) {
+      return null;
+    }
+    try {
+      const places = await this.kakaoKeyword(
+        this.restApiKey!.trim(),
+        `${building} ${dong}동`,
+        { x: args.longitude, y: args.latitude, radius: 1000 },
+      );
+      const hit = places.find(
+        (p) =>
+          String(p.category_name || "").includes("아파트 동") &&
+          String(p.place_name || "").includes(`${dong}동`),
+      );
+      if (!hit?.x || !hit?.y) return null;
+      const latitude = Number(hit.y);
+      const longitude = Number(hit.x);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      return { latitude, longitude };
+    } catch {
+      return null;
+    }
+  }
+
   async resolveCandidates(parsed: ParsedAddress): Promise<CoordinateCandidate[]> {
     if (!this.isConfigured() || !parsed.roadAddress) {
       return [];

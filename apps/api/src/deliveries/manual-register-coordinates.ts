@@ -32,3 +32,26 @@ export function sanitizeManualCoordinates(
 export function toLocationEwkt(coords: ManualCoordinates): string {
   return `SRID=4326;POINT(${coords.longitude} ${coords.latitude})`;
 }
+
+export type ManualCoordSource =
+  | "manual_adjust"
+  | "apartment_dong"
+  | "base_address";
+
+/** User pin > dong keyword > base address. Never invent coords. */
+export function pickManualCoordinatePriority(args: {
+  adjusted: ManualCoordinates | null;
+  apartmentDong: ManualCoordinates | null;
+  baseAddress: ManualCoordinates | null;
+}): { coords: ManualCoordinates; source: ManualCoordSource } | null {
+  if (args.adjusted) {
+    return { coords: args.adjusted, source: "manual_adjust" };
+  }
+  if (args.apartmentDong) {
+    return { coords: args.apartmentDong, source: "apartment_dong" };
+  }
+  if (args.baseAddress) {
+    return { coords: args.baseAddress, source: "base_address" };
+  }
+  return null;
+}

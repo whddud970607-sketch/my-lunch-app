@@ -10,6 +10,7 @@ import '../services/manual_address_repository.dart';
 import 'app_shell_tabs.dart';
 import 'delivery_list_screen.dart';
 import 'home_screen.dart';
+import 'manual_address_register_data.dart';
 import 'manual_address_register_screen.dart';
 import 'map_settings_screen.dart';
 import 'map_spike_screen.dart';
@@ -70,6 +71,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => ManualAddressRegisterScreen(
           repository: ManualAddressRepository(widget.controller.apiClient),
           serviceDate: AppConfig.instance.todayServiceDateOverride,
+          reason: ManualRegisterReason.barcodeScanFailed,
         ),
       ),
     );

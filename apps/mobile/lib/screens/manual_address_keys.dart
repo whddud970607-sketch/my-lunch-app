@@ -12,6 +12,15 @@ abstract final class ManualAddressKeys {
   static const dongField = Key('manual_address_dong');
   static const unitField = Key('manual_address_unit');
   static const quantityField = Key('manual_address_quantity');
+  static const recipientNameField = Key('manual_address_recipient_name');
+  static const recipientPhoneField = Key('manual_address_recipient_phone');
+  static const pinAdjustButton = Key('manual_address_pin_adjust');
+  static const invoiceEvidence = Key('manual_address_invoice_evidence');
+  static const invoicePreview = Key('manual_address_invoice_preview');
+  static const invoiceRetake = Key('manual_address_invoice_retake');
+  static const invoiceRemove = Key('manual_address_invoice_remove');
+  static const invoiceStatus = Key('manual_address_invoice_status');
+  static const invoiceRetry = Key('manual_address_invoice_retry');
   static const confirmButton = Key('manual_address_confirm');
   static const registerBusy = Key('manual_address_register_busy');
   static const success = Key('manual_address_success');

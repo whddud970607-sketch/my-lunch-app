@@ -36,6 +36,10 @@ import {
   type ManualRegisterRequest,
 } from "./delivery-manual-register.service";
 import {
+  DeliveryManualInvoiceEvidenceService,
+  type InvoiceEvidenceUploadRequest,
+} from "./delivery-manual-invoice-evidence.service";
+import {
   fixtureGroupFromKey,
   mapPointStatusLabel,
   mapShipmentStatusLabel,
@@ -59,6 +63,7 @@ export class DeliveriesController {
     private readonly addressSearch: DeliveryAddressSearchService,
     private readonly manualSuggest: DeliveryManualAddressSuggestService,
     private readonly manualRegister: DeliveryManualRegisterService,
+    private readonly invoiceEvidence: DeliveryManualInvoiceEvidenceService,
   ) {}
 
   /**
@@ -144,6 +149,32 @@ export class DeliveriesController {
       companyIds,
       body,
     });
+  }
+
+  @Post("manual/points/:pointId/invoice-evidence")
+  @Roles("driver")
+  async uploadManualInvoiceEvidence(
+    @Param("pointId", ParseUUIDPipe) pointId: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: { supabaseUser: SupabaseClient },
+    @Body() body: InvoiceEvidenceUploadRequest,
+  ) {
+    this.scope.forUser(user).requireDriverId();
+    return this.invoiceEvidence.upload(req.supabaseUser, {
+      user,
+      pointId,
+      body,
+    });
+  }
+
+  @Get("manual/points/:pointId/invoice-evidence")
+  @Roles("driver", "company_admin", "platform_admin")
+  async readManualInvoiceEvidence(
+    @Param("pointId", ParseUUIDPipe) pointId: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: { supabaseUser: SupabaseClient },
+  ) {
+    return this.invoiceEvidence.readSigned(req.supabaseUser, { user, pointId });
   }
 
   @Get("jobs/:id")
@@ -266,6 +297,7 @@ export class DeliveriesController {
       shipmentCount: shipments.length,
       shipments,
       fixtureGroup: fixtureGroupFromKey(point.tracking_or_order_key),
+      hasInvoiceEvidence: await this.invoiceEvidence.hasEvidence(point.id),
     };
   }
 

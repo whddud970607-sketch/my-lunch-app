@@ -17,8 +17,16 @@ import {
   DRIVER_MANUAL_SOURCE_KEY,
   manualTrackingFromIdempotencyKey,
 } from "./delivery-manual-identifier";
-import { sanitizeManualCoordinates } from "./manual-register-coordinates";
+import { AddressResolutionService } from "../address/address-resolution.service";
+import {
+  pickManualCoordinatePriority,
+  sanitizeManualCoordinates,
+} from "./manual-register-coordinates";
 import { parseServiceDateParam } from "./today-workset.service";
+import {
+  parseManualReason,
+  parseRegistrationMethod,
+} from "./manual-invoice-evidence";
 
 export type ManualRegisterRequest = {
   commitIdempotencyKey?: string;
@@ -30,16 +38,28 @@ export type ManualRegisterRequest = {
   dong?: string | null;
   unit?: string | null;
   quantity?: number;
-  /** From server Kakao suggest. Validated; invalid → pending resolution. */
+  recipientName?: string | null;
+  recipientPhone?: string | null;
+  /** True when lat/lng came from driver pin adjust. */
+  pinAdjusted?: boolean;
+  /** Base suggest or driver-adjusted coords. Never a ho-level guess. */
   latitude?: number | string | null;
   longitude?: number | string | null;
+  registrationMethod?: string | null;
+  manualReason?: string | null;
 };
+
+const MAX_RECIPIENT_NAME = 80;
+const MAX_RECIPIENT_PHONE = 20;
 
 export type ManualRegisterResponse = {
   ok: boolean;
   resultCode: "applied" | "duplicate" | "rejected";
   pointId: string | null;
   jobId: string | null;
+  registrationMethod: "manual";
+  manualReason: "barcode_scan_failed" | "manual_entry";
+  evidenceStatus: "none";
 };
 
 const MAX_QUANTITY = 9999;
@@ -75,6 +95,23 @@ export function resolveManualRawAddress(args: {
   return emptyToNull(args.roadAddress) ?? emptyToNull(args.jibunAddress);
 }
 
+export function sanitizeRecipientName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  return t.length > MAX_RECIPIENT_NAME ? t.slice(0, MAX_RECIPIENT_NAME) : t;
+}
+
+/** Keeps digits and a leading +. Does not log the value. */
+export function sanitizeRecipientPhone(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const t = value.trim();
+  if (!t) return null;
+  const compact = t.replace(/[^\d+]/g, "");
+  if (compact.length < 8 || compact.length > MAX_RECIPIENT_PHONE) return null;
+  return compact;
+}
+
 @Injectable()
 export class DeliveryManualRegisterService {
   private readonly logger = new Logger(DeliveryManualRegisterService.name);
@@ -84,6 +121,7 @@ export class DeliveryManualRegisterService {
     private readonly commit: ImportCommitService,
     private readonly serviceSb: SupabaseServiceClient,
     private readonly deliveries: DeliveriesRepository,
+    private readonly address: AddressResolutionService,
   ) {}
 
   async register(
@@ -97,6 +135,18 @@ export class DeliveryManualRegisterService {
     const key = args.body.commitIdempotencyKey?.trim() ?? "";
     if (!key) {
       throw new BadRequestException("commitIdempotencyKey is required");
+    }
+
+    let registrationMethod: "manual";
+    let manualReason: "barcode_scan_failed" | "manual_entry";
+    try {
+      registrationMethod = parseRegistrationMethod(
+        args.body.registrationMethod,
+      );
+      manualReason = parseManualReason(args.body.manualReason);
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "invalid_manual_reason";
+      throw new BadRequestException(code);
     }
 
     let serviceDate: string;
@@ -123,10 +173,32 @@ export class DeliveryManualRegisterService {
     const buildingName = emptyToNull(args.body.buildingName);
     const detail = composeManualDongHoDetail(args.body);
     const displayLabel = buildingName ?? addressRaw;
-    const coords = sanitizeManualCoordinates(
+    const recipientName = sanitizeRecipientName(args.body.recipientName);
+    const recipientPhone = sanitizeRecipientPhone(args.body.recipientPhone);
+    const payloadCoords = sanitizeManualCoordinates(
       args.body.latitude,
       args.body.longitude,
     );
+    const adjusted = args.body.pinAdjusted === true ? payloadCoords : null;
+    const baseCoords = args.body.pinAdjusted === true ? null : payloadCoords;
+    let apartmentDong: ReturnType<typeof sanitizeManualCoordinates> = null;
+    if (!adjusted && baseCoords && buildingName && emptyToNull(args.body.dong)) {
+      const dongHit = await this.address.lookupApartmentDongCoords({
+        buildingName,
+        dong: emptyToNull(args.body.dong),
+        latitude: baseCoords.latitude,
+        longitude: baseCoords.longitude,
+      });
+      apartmentDong = dongHit
+        ? sanitizeManualCoordinates(dongHit.latitude, dongHit.longitude)
+        : null;
+    }
+    const picked = pickManualCoordinatePriority({
+      adjusted,
+      apartmentDong,
+      baseAddress: baseCoords,
+    });
+    const coords = picked?.coords ?? null;
 
     const draft: NormalizedDeliveryDraft = {
       rowIndex: 0,
@@ -138,7 +210,7 @@ export class DeliveryManualRegisterService {
       externalId: trackingCode,
       quantity: qty,
       quantityOrigin: "explicit",
-      customerName: null,
+      customerName: recipientName,
       addressRaw,
       addressNormalized: addressRaw.replace(/\s+/g, " ").trim(),
       detailAddress: composeDetailAddressWithComplex(buildingName, detail),
@@ -183,22 +255,44 @@ export class DeliveryManualRegisterService {
       );
     }
 
-    if (coords && pointId) {
+    if (pointId) {
       const admin = this.serviceSb.getOrNull();
+      if (coords) {
+        if (admin) {
+          const persisted = await this.deliveries.applyManualSearchLocation(
+            admin,
+            {
+              pointId,
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              driverAdjusted: picked?.source === "manual_adjust",
+            },
+          );
+          if (!persisted) {
+            this.logger.warn("manual_search_location_persist_failed");
+          }
+        } else {
+          this.logger.warn("manual_search_location_persist_unavailable");
+        }
+      }
+      if (recipientPhone && admin) {
+        await this.deliveries.applyManualRecipientContact(admin, {
+          pointId,
+          contactValue: recipientPhone,
+        });
+      }
       if (admin) {
-        const persisted = await this.deliveries.applyManualSearchLocation(
+        const persisted = await this.deliveries.upsertManualRegistration(
           admin,
           {
             pointId,
-            latitude: coords.latitude,
-            longitude: coords.longitude,
+            driverId: args.driverId,
+            manualReason,
           },
         );
         if (!persisted) {
-          this.logger.warn("manual_search_location_persist_failed");
+          this.logger.warn("manual_registration_meta_persist_failed");
         }
-      } else {
-        this.logger.warn("manual_search_location_persist_unavailable");
       }
     }
 
@@ -207,6 +301,9 @@ export class DeliveryManualRegisterService {
       resultCode: result.resultCode === "duplicate" ? "duplicate" : "applied",
       pointId,
       jobId,
+      registrationMethod,
+      manualReason,
+      evidenceStatus: "none",
     };
   }
 

@@ -33,6 +33,24 @@ abstract final class DriverChromeCopy {
   static const manualRegisterMissingAddress = '선택한 주소가 비어 있습니다. 다시 검색해 주세요.';
   static const manualRegisterBadQuantity = '수량을 확인해 주세요.';
   static const manualConfirmTitle = '목적지 확인';
+  static const manualRecipientName = '수령인 성함';
+  static const manualRecipientPhone = '연락처';
+  static const manualPinAdjust = '지도에서 위치 확인/조정';
+  static const manualPinConfirm = '이 위치로 설정';
+  static const manualPinHint = '단지나 동이 다르면 지도를 옮겨 핀을 맞춰 주세요.';
+  static const manualInvoiceEvidenceTitle = '송장 증빙 사진';
+  static const manualInvoiceEvidenceHint =
+      '바코드가 인식되지 않을 경우 실제 송장을 촬영해 증빙으로 남길 수 있습니다.';
+  static const manualInvoiceCapture = '송장 촬영';
+  static const manualInvoiceGallery = '앨범에서 선택';
+  static const manualInvoiceCaptured = '증빙 사진이 준비되었습니다';
+  static const manualInvoiceRetake = '다시 촬영';
+  static const manualInvoiceRemove = '삭제';
+  static const manualInvoiceUploading = '증빙 업로드 중';
+  static const manualInvoiceUploaded = '증빙이 저장되었습니다';
+  static const manualInvoiceUploadFailed = '증빙 업로드 실패, 다시 시도할 수 있습니다';
+  static const manualInvoiceRetry = '증빙 다시 업로드';
+  static const manualInvoiceRejected = '증빙 사진 형식을 확인해 주세요.';
   static const manualOffline = '인터넷에 연결한 뒤 다시 시도해 주세요.';
   static const openDeliveryList = '배송 목록';
 }

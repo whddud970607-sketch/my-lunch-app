@@ -80,6 +80,13 @@ String manualRegisterErrorMessage(Object error) {
         return DriverChromeCopy.manualRegisterMissingAddress;
       case 'quantity must be a non-negative integer':
         return DriverChromeCopy.manualRegisterBadQuantity;
+      case 'invalid_mime':
+      case 'file_too_large':
+        return DriverChromeCopy.manualInvoiceRejected;
+      case 'evidence_upload_failed':
+      case 'evidence_storage_unavailable':
+      case 'evidence_relation_failed':
+        return DriverChromeCopy.manualInvoiceUploadFailed;
       default:
         if (code.startsWith('import_context_')) {
           return DriverChromeCopy.manualRegisterServerBusy;
@@ -101,6 +108,95 @@ bool isOfflineManualFailure(Object error) {
       text.contains('network') ||
       text.contains('connection') ||
       text.contains('timeout');
+}
+
+enum ManualRegisterReason { barcodeScanFailed, manualEntry }
+
+enum InvoiceEvidenceRequirement { optional, required }
+
+enum InvoiceEvidenceUploadStatus { none, ready, uploading, uploaded, failed }
+
+String manualReasonApiValue(ManualRegisterReason reason) {
+  switch (reason) {
+    case ManualRegisterReason.barcodeScanFailed:
+      return 'barcode_scan_failed';
+    case ManualRegisterReason.manualEntry:
+      return 'manual_entry';
+  }
+}
+
+enum ManualPinSource { manualAdjust, apartmentDong, baseAddress }
+
+class ManualPinSelection {
+  const ManualPinSelection({
+    required this.latitude,
+    required this.longitude,
+    required this.source,
+  });
+
+  final double latitude;
+  final double longitude;
+  final ManualPinSource source;
+}
+
+class InvoiceEvidenceDraft {
+  const InvoiceEvidenceDraft({
+    this.bytes,
+    this.capturedAt,
+    this.status = InvoiceEvidenceUploadStatus.none,
+  });
+
+  final List<int>? bytes;
+  final DateTime? capturedAt;
+  final InvoiceEvidenceUploadStatus status;
+
+  bool get hasLocalImage => bytes != null && bytes!.isNotEmpty;
+}
+
+bool showInvoiceEvidenceSection({
+  required ManualRegisterReason reason,
+  InvoiceEvidenceRequirement requirement = InvoiceEvidenceRequirement.optional,
+}) {
+  return reason == ManualRegisterReason.barcodeScanFailed ||
+      requirement == InvoiceEvidenceRequirement.required;
+}
+
+InvoiceEvidenceRequirement invoiceEvidenceRequirementFor(
+  ManualRegisterReason reason,
+) {
+  // Policy hook: barcode-scan-failed starts optional; ops can flip later.
+  switch (reason) {
+    case ManualRegisterReason.barcodeScanFailed:
+      return InvoiceEvidenceRequirement.optional;
+    case ManualRegisterReason.manualEntry:
+      return InvoiceEvidenceRequirement.optional;
+  }
+}
+
+const maxManualRecipientNameLength = 80;
+
+String? sanitizeManualRecipientName(String? raw) {
+  final t = (raw ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (t.isEmpty) return null;
+  return t.length > maxManualRecipientNameLength
+      ? t.substring(0, maxManualRecipientNameLength)
+      : t;
+}
+
+String? sanitizeManualRecipientPhone(String? raw) {
+  final t = (raw ?? '').trim();
+  if (t.isEmpty) return null;
+  final compact = t.replaceAll(RegExp(r'[^\d+]'), '');
+  if (compact.length < 8 || compact.length > 20) return null;
+  return compact;
+}
+
+ManualPinSelection? pickManualPinSelection({
+  ManualPinSelection? adjusted,
+  ManualPinSelection? apartmentDong,
+  ManualPinSelection? baseAddress,
+}) {
+  return adjusted ?? apartmentDong ?? baseAddress;
 }
 
 /// Search-result coords for register payload. Invalid/missing → omitted.

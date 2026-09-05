@@ -1,6 +1,7 @@
 import '../models/manual_address_candidate.dart';
 import '../screens/manual_address_register_data.dart';
 import 'api_client.dart';
+import 'invoice_evidence_image.dart';
 
 
 /// Nest manual-address APIs. Does not call Phase B assigned-point search.
@@ -28,14 +29,26 @@ class ManualAddressRepository {
     String? detailAddress,
     String? dong,
     String? unit,
+    String? recipientName,
+    String? recipientPhone,
+    ManualPinSelection? pin,
     required int quantity,
     String? serviceDate,
+    ManualRegisterReason reason = ManualRegisterReason.manualEntry,
   }) {
     final normalizedDetail = composeManualDetailAddress(
       detail: detailAddress,
       dong: dong,
       unit: unit,
     );
+    final name = sanitizeManualRecipientName(recipientName);
+    final phone = sanitizeManualRecipientPhone(recipientPhone);
+    final coords = pin == null
+        ? manualRegisterCoordinateFields(candidate)
+        : {
+            'latitude': pin.latitude,
+            'longitude': pin.longitude,
+          };
     return _api
         .postJson('/delivery/manual/register', {
           'commitIdempotencyKey': commitIdempotencyKey,
@@ -47,9 +60,31 @@ class ManualAddressRepository {
           'detailAddress': normalizedDetail.isEmpty ? null : normalizedDetail,
           'dong': (dong ?? '').trim(),
           'unit': (unit ?? '').trim(),
+          'recipientName': ?name,
+          'recipientPhone': ?phone,
           'quantity': quantity,
-          ...manualRegisterCoordinateFields(candidate),
+          ...coords,
+          if (pin?.source == ManualPinSource.manualAdjust) 'pinAdjusted': true,
+          'registrationMethod': 'manual',
+          'manualReason': manualReasonApiValue(reason),
         })
         .then(ManualRegisterResult.fromJson);
+  }
+
+  Future<InvoiceEvidenceUploadResult> uploadInvoiceEvidence({
+    required String pointId,
+    required List<int> bytes,
+    DateTime? capturedAt,
+    ManualRegisterReason? reason,
+  }) {
+    final prepared = prepareInvoiceEvidenceBytes(bytes);
+    return _api
+        .postJson('/delivery/manual/points/$pointId/invoice-evidence', {
+          'contentType': prepared.contentType,
+          'bytesBase64': invoiceEvidenceBytesBase64(prepared.bytes),
+          if (capturedAt != null) 'capturedAt': capturedAt.toUtc().toIso8601String(),
+          if (reason != null) 'manualReason': manualReasonApiValue(reason),
+        })
+        .then(InvoiceEvidenceUploadResult.fromJson);
   }
 }

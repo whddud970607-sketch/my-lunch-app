@@ -13,6 +13,7 @@ import { TodayWorksetService } from "./today-workset.service";
 import { DeliveryAddressSearchService } from "./delivery-address-search.service";
 import { DeliveryManualAddressSuggestService } from "./delivery-manual-address-suggest.service";
 import { DeliveryManualRegisterService } from "./delivery-manual-register.service";
+import { DeliveryManualInvoiceEvidenceService } from "./delivery-manual-invoice-evidence.service";
 
 @Module({
   imports: [AuthModule, AddressModule, ImportModule],
@@ -24,6 +25,7 @@ import { DeliveryManualRegisterService } from "./delivery-manual-register.servic
     DeliveryAddressSearchService,
     DeliveryManualAddressSuggestService,
     DeliveryManualRegisterService,
+    DeliveryManualInvoiceEvidenceService,
     AccessScopeService,
     AccessInfoCryptoService,
     AccessSecretsRepository,

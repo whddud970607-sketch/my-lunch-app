@@ -138,18 +138,49 @@ export class DeliveriesRepository {
    */
   async applyManualSearchLocation(
     admin: SupabaseClient,
-    args: { pointId: string; latitude: number; longitude: number },
+    args: {
+      pointId: string;
+      latitude: number;
+      longitude: number;
+      driverAdjusted?: boolean;
+    },
   ): Promise<boolean> {
     const ewkt = `SRID=4326;POINT(${args.longitude} ${args.latitude})`;
+    const patch: Record<string, string> = { location: ewkt };
+    if (args.driverAdjusted) {
+      patch.driver_adjusted_location = ewkt;
+      patch.pin_accuracy = "driver_verified";
+    }
     const { error } = await admin
       .from("delivery_points")
-      .update({ location: ewkt })
+      .update(patch)
       .eq("id", args.pointId)
       .is("location", null);
 
     if (error) {
       this.logger.warn(
         `manual search location persist failed code=${error.code}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  async applyManualRecipientContact(
+    admin: SupabaseClient,
+    args: { pointId: string; contactValue: string },
+  ): Promise<boolean> {
+    const { error } = await admin
+      .from("delivery_point_pii")
+      .update({
+        contact_type: "masked_number",
+        contact_value: args.contactValue,
+      })
+      .eq("point_id", args.pointId);
+
+    if (error) {
+      this.logger.warn(
+        `manual recipient contact persist failed code=${error.code}`,
       );
       return false;
     }
@@ -337,5 +368,139 @@ export class DeliveriesRepository {
     }
 
     return { ok: true };
+  }
+
+  async findPointById(
+    userClient: SupabaseClient,
+    pointId: string,
+  ): Promise<MapSpikePointRow | null> {
+    const { data, error } = await userClient
+      .from("delivery_points")
+      .select(
+        "id, job_id, driver_id, display_label, carrier_code, quantity, status, pin_accuracy, location, pii_masked_at, tracking_or_order_key",
+      )
+      .eq("id", pointId)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(`delivery_points by id failed code=${error.code}`);
+      return null;
+    }
+    return (data as MapSpikePointRow | null) ?? null;
+  }
+
+  async findManualRegistration(
+    client: SupabaseClient,
+    pointId: string,
+  ): Promise<{
+    pointId: string;
+    driverId: string;
+    registrationMethod: string;
+    manualReason: "barcode_scan_failed" | "manual_entry";
+    evidenceType: string | null;
+    storagePath: string | null;
+  } | null> {
+    const { data, error } = await client
+      .from("delivery_manual_registrations")
+      .select(
+        "point_id, driver_id, registration_method, manual_reason, evidence_type, storage_path",
+      )
+      .eq("point_id", pointId)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") {
+        this.logger.warn("manual_registration_table_unavailable");
+        return null;
+      }
+      this.logger.warn(`manual_registration select failed code=${error.code}`);
+      return null;
+    }
+    const row = data as {
+      point_id?: string;
+      driver_id?: string;
+      registration_method?: string;
+      manual_reason?: "barcode_scan_failed" | "manual_entry";
+      evidence_type?: string | null;
+      storage_path?: string | null;
+    } | null;
+    if (!row?.point_id || !row.driver_id || !row.manual_reason) return null;
+    return {
+      pointId: row.point_id,
+      driverId: row.driver_id,
+      registrationMethod: row.registration_method ?? "manual",
+      manualReason: row.manual_reason,
+      evidenceType: row.evidence_type ?? null,
+      storagePath: row.storage_path ?? null,
+    };
+  }
+
+  async upsertManualRegistration(
+    admin: SupabaseClient,
+    args: {
+      pointId: string;
+      driverId: string;
+      manualReason: "barcode_scan_failed" | "manual_entry";
+    },
+  ): Promise<boolean> {
+    const { error } = await admin.from("delivery_manual_registrations").upsert(
+      {
+        point_id: args.pointId,
+        driver_id: args.driverId,
+        registration_method: "manual",
+        manual_reason: args.manualReason,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "point_id" },
+    );
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") {
+        this.logger.warn("manual_registration_table_unavailable");
+        return false;
+      }
+      this.logger.warn(`manual_registration upsert failed code=${error.code}`);
+      return false;
+    }
+    return true;
+  }
+
+  async attachManualInvoiceEvidence(
+    admin: SupabaseClient,
+    args: {
+      pointId: string;
+      driverId: string;
+      manualReason: "barcode_scan_failed" | "manual_entry";
+      evidenceType: string;
+      storagePath: string;
+      contentType: string;
+      byteSize: number;
+      capturedAt: string | null;
+    },
+  ): Promise<boolean> {
+    const { error } = await admin.from("delivery_manual_registrations").upsert(
+      {
+        point_id: args.pointId,
+        driver_id: args.driverId,
+        registration_method: "manual",
+        manual_reason: args.manualReason,
+        evidence_type: args.evidenceType,
+        storage_bucket: "delivery-proofs",
+        storage_path: args.storagePath,
+        content_type: args.contentType,
+        byte_size: args.byteSize,
+        captured_at: args.capturedAt,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "point_id" },
+    );
+    if (error) {
+      if (error.code === "42P01" || error.code === "PGRST205") {
+        this.logger.warn("manual_registration_table_unavailable");
+        return false;
+      }
+      this.logger.warn(`manual_invoice_evidence attach failed code=${error.code}`);
+      return false;
+    }
+    return true;
   }
 }

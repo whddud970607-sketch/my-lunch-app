@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -7,7 +9,12 @@ import 'package:delivery_shield_mobile/screens/manual_address_register_data.dart
 import 'package:delivery_shield_mobile/screens/manual_address_register_screen.dart';
 import 'package:delivery_shield_mobile/services/api_client.dart';
 import 'package:delivery_shield_mobile/services/manual_address_repository.dart';
+import 'package:delivery_shield_mobile/copy/driver_chrome_copy.dart';
 import 'package:delivery_shield_mobile/theme/app_theme.dart';
+
+List<int> _validJpeg() => base64Decode(
+      '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAAEAAQMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAABAgcH/8QAFhABAQEAAAAAAAAAAAAAAAAAAAER/9oADAMBAAIQAxAAAAGf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPwB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwB//9k=',
+    );
 
 const _candidate = ManualAddressCandidate(
   roadAddress: '인천광역시 남동구 서창남순환로 55',
@@ -23,10 +30,15 @@ class FakeManualRepo extends ManualAddressRepository {
   List<ManualAddressCandidate> hits = const [_candidate];
   int suggestCalls = 0;
   int registerCalls = 0;
+  int uploadCalls = 0;
   String? lastKey;
-  String? lastDetailAddress;
+    String? lastDetailAddress;
+    String? lastRecipientName;
+    ManualPinSelection? lastPin;
+  ManualRegisterReason? lastReason;
   Object? suggestError;
   Object? registerError;
+  Object? uploadError;
   ManualRegisterResult result = const ManualRegisterResult(
     ok: true,
     resultCode: 'applied',
@@ -53,11 +65,18 @@ class FakeManualRepo extends ManualAddressRepository {
     String? detailAddress,
     String? dong,
     String? unit,
+    String? recipientName,
+    String? recipientPhone,
+    ManualPinSelection? pin,
     required int quantity,
     String? serviceDate,
+    ManualRegisterReason reason = ManualRegisterReason.manualEntry,
   }) async {
     registerCalls += 1;
     lastKey = commitIdempotencyKey;
+    lastRecipientName = sanitizeManualRecipientName(recipientName);
+    lastPin = pin;
+    lastReason = reason;
     lastDetailAddress = composeManualDetailAddress(
       detail: detailAddress,
       dong: dong,
@@ -66,9 +85,85 @@ class FakeManualRepo extends ManualAddressRepository {
     if (registerError != null) throw registerError!;
     return result;
   }
+
+  @override
+  Future<InvoiceEvidenceUploadResult> uploadInvoiceEvidence({
+    required String pointId,
+    required List<int> bytes,
+    DateTime? capturedAt,
+    ManualRegisterReason? reason,
+  }) async {
+    uploadCalls += 1;
+    if (uploadError != null) throw uploadError!;
+    return const InvoiceEvidenceUploadResult(
+      ok: true,
+      evidenceStatus: 'uploaded',
+      evidenceType: 'manual_invoice_scan_failure',
+    );
+  }
 }
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final binding = TestWidgetsFlutterBinding.instance;
+    binding.window.physicalSizeTestValue = const Size(800, 2400);
+    binding.window.devicePixelRatioTestValue = 1;
+  });
+
+  tearDown(() {
+    final binding = TestWidgetsFlutterBinding.instance;
+    binding.window.clearPhysicalSizeTestValue();
+    binding.window.clearDevicePixelRatioTestValue();
+  });
+
+  test('base address stays separate from dong/ho geocoding', () {
+    expect(
+      composeManualDetailAddress(detail: '', dong: '504', unit: '2004'),
+      '504동 2004호',
+    );
+    expect(
+      pickManualPinSelection(
+        adjusted: const ManualPinSelection(
+          latitude: 37.1,
+          longitude: 126.1,
+          source: ManualPinSource.manualAdjust,
+        ),
+        apartmentDong: const ManualPinSelection(
+          latitude: 37.2,
+          longitude: 126.2,
+          source: ManualPinSource.apartmentDong,
+        ),
+        baseAddress: const ManualPinSelection(
+          latitude: 37.3,
+          longitude: 126.3,
+          source: ManualPinSource.baseAddress,
+        ),
+      )?.source,
+      ManualPinSource.manualAdjust,
+    );
+    expect(sanitizeManualRecipientName(' 홍길동 '), '홍길동');
+    expect(sanitizeManualRecipientPhone('010-1234-5678'), '01012345678');
+    expect(
+      showInvoiceEvidenceSection(
+        reason: ManualRegisterReason.barcodeScanFailed,
+      ),
+      isTrue,
+    );
+    expect(
+      showInvoiceEvidenceSection(reason: ManualRegisterReason.manualEntry),
+      isFalse,
+    );
+    expect(
+      manualReasonApiValue(ManualRegisterReason.barcodeScanFailed),
+      'barcode_scan_failed',
+    );
+    expect(
+      manualReasonApiValue(ManualRegisterReason.manualEntry),
+      'manual_entry',
+    );
+  });
+
   test('search coords are included on the register payload', () {
     expect(
       manualRegisterCoordinateFields(_candidate),
@@ -110,6 +205,27 @@ void main() {
     expect(id.key, 'k-0');
     id.reset();
     expect(id.key, 'k-1');
+  });
+
+  testWidgets('invoice evidence shows after barcode scan failure', (tester) async {
+    final repo = FakeManualRepo();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: ManualAddressRegisterScreen(
+          repository: repo,
+          reason: ManualRegisterReason.barcodeScanFailed,
+          debounce: Duration.zero,
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(ManualAddressKeys.searchField), '서창');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('인천광역시 남동구 서창남순환로 55'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ManualAddressKeys.invoiceEvidence), findsOneWidget);
+    expect(find.byKey(ManualAddressKeys.recipientNameField), findsOneWidget);
+    expect(find.byKey(ManualAddressKeys.pinAdjustButton), findsOneWidget);
   });
 
   testWidgets('CTA search states and select does not create', (tester) async {
@@ -259,5 +375,79 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(ManualAddressKeys.success), findsNothing);
     expect(find.text('인터넷에 연결한 뒤 다시 시도해 주세요.'), findsOneWidget);
+  });
+
+  testWidgets('evidence preview remove and retry after upload failure',
+      (tester) async {
+    final repo = FakeManualRepo()..uploadError = Exception('timeout');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: ManualAddressRegisterScreen(
+          repository: repo,
+          reason: ManualRegisterReason.barcodeScanFailed,
+          debounce: Duration.zero,
+          pickInvoice: (_) async => InvoiceEvidenceDraft(
+            bytes: _validJpeg(),
+            capturedAt: DateTime.utc(2026, 9, 5),
+            status: InvoiceEvidenceUploadStatus.ready,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(ManualAddressKeys.searchField), '서창');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('인천광역시 남동구 서창남순환로 55'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(DriverChromeCopy.manualInvoiceCapture));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ManualAddressKeys.invoicePreview), findsOneWidget);
+    expect(find.byKey(ManualAddressKeys.invoiceRetake), findsOneWidget);
+    expect(find.byKey(ManualAddressKeys.invoiceRemove), findsOneWidget);
+
+    await tester.tap(find.byKey(ManualAddressKeys.invoiceRemove));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ManualAddressKeys.invoicePreview), findsNothing);
+
+    await tester.tap(find.text(DriverChromeCopy.manualInvoiceCapture));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(ManualAddressKeys.confirmButton));
+    await tester.tap(find.byKey(ManualAddressKeys.confirmButton));
+    await tester.pumpAndSettle();
+    expect(repo.registerCalls, 1);
+    expect(repo.lastReason, ManualRegisterReason.barcodeScanFailed);
+    expect(repo.uploadCalls, 1);
+    expect(find.byKey(ManualAddressKeys.success), findsOneWidget);
+    expect(find.byKey(ManualAddressKeys.invoiceRetry), findsOneWidget);
+
+    repo.uploadError = null;
+    await tester.tap(find.byKey(ManualAddressKeys.invoiceRetry));
+    await tester.pumpAndSettle();
+    expect(repo.uploadCalls, 2);
+  });
+
+  testWidgets('manual entry register skips evidence upload', (tester) async {
+    final repo = FakeManualRepo();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: ManualAddressRegisterScreen(
+          repository: repo,
+          reason: ManualRegisterReason.manualEntry,
+          debounce: Duration.zero,
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(ManualAddressKeys.searchField), '서창');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('인천광역시 남동구 서창남순환로 55'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ManualAddressKeys.invoiceEvidence), findsNothing);
+    await tester.tap(find.byKey(ManualAddressKeys.confirmButton));
+    await tester.pumpAndSettle();
+    expect(repo.registerCalls, 1);
+    expect(repo.lastReason, ManualRegisterReason.manualEntry);
+    expect(repo.uploadCalls, 0);
+    expect(find.byKey(ManualAddressKeys.success), findsOneWidget);
   });
 }

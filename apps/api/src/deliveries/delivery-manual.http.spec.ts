@@ -34,6 +34,18 @@ describe("manual address HTTP auth", () => {
     expect(res.status).toBe(401);
   });
 
+  it("UNAUTHENTICATED_INVOICE_EVIDENCE_401", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/v1/delivery/manual/points/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/invoice-evidence")
+      .send({ contentType: "image/jpeg", bytesBase64: "e30=" });
+    expect(res.status).toBe(401);
+
+    const read = await request(app.getHttpServer()).get(
+      "/v1/delivery/manual/points/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/invoice-evidence",
+    );
+    expect(read.status).toBe(401);
+  });
+
   it("PHASE_B_SEARCH_UNCHANGED_401", async () => {
     const res = await request(app.getHttpServer()).get(
       "/v1/delivery/today/search?q=x",
