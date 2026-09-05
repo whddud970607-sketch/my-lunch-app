@@ -1,6 +1,8 @@
 import 'package:uuid/uuid.dart';
 
+import '../copy/driver_chrome_copy.dart';
 import '../models/manual_address_candidate.dart';
+import '../services/api_exception.dart';
 
 /// Client idempotency: one UUID per 등록 intent, reused on retry/double-tap.
 class ManualRegisterIdempotency {
@@ -27,23 +29,69 @@ int normalizeManualQuantity(String raw) {
 
 int defaultManualQuantity() => 1;
 
+String _blankToEmpty(String? raw) => (raw ?? '').trim();
+
+String _withKoreanSuffix(String raw, String suffix) {
+  if (raw.isEmpty) return '';
+  return raw.endsWith(suffix) ? raw : '$raw$suffix';
+}
+
+/// Normalizes optional detail + 동/호 for payload and stored address.
+/// Empty/whitespace fields are ignored. Does not invent a detail from quantity.
+String composeManualDetailAddress({
+  required String? detail,
+  required String? dong,
+  required String? unit,
+}) {
+  final extra = _blankToEmpty(detail);
+  final dongPart = _withKoreanSuffix(_blankToEmpty(dong), '동');
+  final hoPart = _withKoreanSuffix(_blankToEmpty(unit), '호');
+  final generated = [dongPart, hoPart].where((p) => p.isNotEmpty).join(' ');
+  if (extra.isEmpty) return generated;
+  if (generated.isEmpty) return extra;
+  if (extra.contains(generated)) return extra;
+  return '$generated $extra';
+}
+
 String composeManualDetailPreview({
   required String? detail,
   required String? dong,
   required String? unit,
 }) {
-  final parts = <String>[];
-  final d = dong?.trim() ?? '';
-  if (d.isNotEmpty) {
-    parts.add(d.endsWith('동') ? d : '$d동');
+  return composeManualDetailAddress(detail: detail, dong: dong, unit: unit);
+}
+
+String manualRegisterErrorMessage(Object error) {
+  if (isOfflineManualFailure(error)) {
+    return DriverChromeCopy.manualOffline;
   }
-  final u = unit?.trim() ?? '';
-  if (u.isNotEmpty) {
-    parts.add(u.endsWith('호') ? u : '$u호');
+  if (error is ApiException) {
+    if (error.unauthorized) {
+      return DriverChromeCopy.manualRegisterNeedLogin;
+    }
+    final code = (error.code ?? error.message).trim();
+    switch (code) {
+      case 'source_ensure_unavailable':
+      case 'source_ensure_failed':
+        return DriverChromeCopy.manualRegisterServerBusy;
+      case 'validation_not_committable':
+        return DriverChromeCopy.manualRegisterInvalidAddress;
+      case 'address is required':
+        return DriverChromeCopy.manualRegisterMissingAddress;
+      case 'quantity must be a non-negative integer':
+        return DriverChromeCopy.manualRegisterBadQuantity;
+      default:
+        if (code.startsWith('import_context_')) {
+          return DriverChromeCopy.manualRegisterServerBusy;
+        }
+        if (error.message.isNotEmpty &&
+            error.message != 'Request failed' &&
+            !error.message.contains('Exception')) {
+          return '${DriverChromeCopy.manualRegisterFailed} · ${error.message}';
+        }
+    }
   }
-  final extra = detail?.trim() ?? '';
-  if (extra.isNotEmpty) parts.add(extra);
-  return parts.join(' ');
+  return DriverChromeCopy.manualRegisterFailed;
 }
 
 bool isOfflineManualFailure(Object error) {
@@ -51,7 +99,8 @@ bool isOfflineManualFailure(Object error) {
   return text.contains('socket') ||
       text.contains('failed host lookup') ||
       text.contains('network') ||
-      text.contains('connection');
+      text.contains('connection') ||
+      text.contains('timeout');
 }
 
 List<ManualAddressCandidate> parseManualSuggestResults(

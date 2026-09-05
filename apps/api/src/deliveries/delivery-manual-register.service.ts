@@ -50,19 +50,17 @@ export function composeManualDongHoDetail(args: {
   dong?: string | null;
   unit?: string | null;
 }): string | null {
-  const parts: string[] = [];
+  const extra = emptyToNull(args.detailAddress);
   const dong = emptyToNull(args.dong);
-  if (dong) {
-    parts.push(/동$/.test(dong) ? dong : `${dong}동`);
-  }
   const unit = emptyToNull(args.unit);
-  if (unit) {
-    parts.push(/호$/.test(unit) ? unit : `${unit}호`);
-  }
-  const detail = emptyToNull(args.detailAddress);
-  if (detail) parts.push(detail);
-  if (!parts.length) return null;
-  return parts.join(" ");
+  const dongPart = dong ? (/동$/.test(dong) ? dong : `${dong}동`) : null;
+  const hoPart = unit ? (/호$/.test(unit) ? unit : `${unit}호`) : null;
+  const generated = [dongPart, hoPart].filter(Boolean).join(" ");
+  if (!extra && !generated) return null;
+  if (!extra) return generated;
+  if (!generated) return extra;
+  if (extra.includes(generated)) return extra;
+  return `${generated} ${extra}`;
 }
 
 export function resolveManualRawAddress(args: {

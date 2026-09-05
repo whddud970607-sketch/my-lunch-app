@@ -45,6 +45,9 @@ class TmapNaviPocActivity : AppCompatActivity() {
         const val EXTRA_API_KEY = "extra_tmap_api_key"
         const val EXTRA_USER_KEY = "extra_tmap_user_key"
         const val EXTRA_DEVICE_KEY = "extra_tmap_device_key"
+        const val EXTRA_DEST_LAT = "extra_tmap_dest_lat"
+        const val EXTRA_DEST_LNG = "extra_tmap_dest_lng"
+        const val EXTRA_DEST_NAME = "extra_tmap_dest_name"
         private const val TAG = "TmapNaviPoc"
         private const val PERMISSION_REQUEST_CODE = 9201
     }
@@ -57,6 +60,9 @@ class TmapNaviPocActivity : AppCompatActivity() {
     private var apiKey: String = ""
     private var userKey: String = ""
     private var deviceKey: String = ""
+    private var destLat: Double? = null
+    private var destLng: Double? = null
+    private var destName: String = ""
     private var initStarted = false
     private var routeRequested = false
     private var exiting = false
@@ -69,6 +75,11 @@ class TmapNaviPocActivity : AppCompatActivity() {
         apiKey = intent.getStringExtra(EXTRA_API_KEY)?.trim().orEmpty()
         userKey = intent.getStringExtra(EXTRA_USER_KEY)?.trim().orEmpty()
         deviceKey = intent.getStringExtra(EXTRA_DEVICE_KEY)?.trim().orEmpty()
+        if (intent.hasExtra(EXTRA_DEST_LAT) && intent.hasExtra(EXTRA_DEST_LNG)) {
+            destLat = intent.getDoubleExtra(EXTRA_DEST_LAT, 0.0)
+            destLng = intent.getDoubleExtra(EXTRA_DEST_LNG, 0.0)
+            destName = intent.getStringExtra(EXTRA_DEST_NAME)?.trim().orEmpty()
+        }
 
         statusView = findViewById(R.id.poc_status)
         val chrome = findViewById<View>(R.id.poc_chrome)
@@ -349,13 +360,24 @@ class TmapNaviPocActivity : AppCompatActivity() {
                 currentName,
                 MapPoint(currentLocation.longitude, currentLocation.latitude),
             )
-            val endPoint = WayPoint(
-                TmapNaviPocFixture.DESTINATION_LABEL,
-                MapPoint(
-                    TmapNaviPocFixture.DESTINATION_LONGITUDE,
-                    TmapNaviPocFixture.DESTINATION_LATITUDE,
-                ),
-            )
+            val destLatitude = destLat
+            val destLongitude = destLng
+            val endPoint = if (destLatitude != null && destLongitude != null &&
+                destLatitude != 0.0 && destLongitude != 0.0
+            ) {
+                WayPoint(
+                    destName.ifEmpty { "배송지" },
+                    MapPoint(destLongitude, destLatitude),
+                )
+            } else {
+                WayPoint(
+                    TmapNaviPocFixture.DESTINATION_LABEL,
+                    MapPoint(
+                        TmapNaviPocFixture.DESTINATION_LONGITUDE,
+                        TmapNaviPocFixture.DESTINATION_LATITUDE,
+                    ),
+                )
+            }
             val planTypes = arrayListOf(
                 RoutePlanType.Traffic_Recommend,
                 RoutePlanType.Traffic_Free,

@@ -39,6 +39,34 @@ describe("manual identifier + address compose", () => {
         detailAddress: "경비실",
       }),
     ).toBe("504동 2003호 경비실");
+    expect(
+      composeManualDongHoDetail({
+        dong: "101",
+        unit: "1203",
+        detailAddress: "",
+      }),
+    ).toBe("101동 1203호");
+    expect(
+      composeManualDongHoDetail({
+        dong: "101동",
+        unit: "1203호",
+        detailAddress: "",
+      }),
+    ).toBe("101동 1203호");
+    expect(
+      composeManualDongHoDetail({
+        dong: "101",
+        unit: "1203",
+        detailAddress: "101동 1203호",
+      }),
+    ).toBe("101동 1203호");
+    expect(
+      composeManualDongHoDetail({
+        dong: " 101 ",
+        unit: " 1203 ",
+        detailAddress: "   ",
+      }),
+    ).toBe("101동 1203호");
   });
 });
 

@@ -5,6 +5,7 @@ import 'delivery_map_controller.dart';
 import 'kakao_delivery_map.dart';
 import 'map_provider_id.dart';
 import 'naver_delivery_map.dart';
+import 'tmap_delivery_map.dart';
 
 /// Picks the map SDK host for the selected [MapProviderId].
 class DeliveryMapSurface extends StatelessWidget {
@@ -37,6 +38,14 @@ class DeliveryMapSurface extends StatelessWidget {
       case MapProviderId.naver:
         return NaverDeliveryMap(
           key: const ValueKey('map-host-naver'),
+          initialTarget: initialTarget,
+          pins: pins,
+          onPinTap: onPinTap,
+          onReady: onReady,
+        );
+      case MapProviderId.tmap:
+        return TmapDeliveryMap(
+          key: const ValueKey('map-host-tmap'),
           initialTarget: initialTarget,
           pins: pins,
           onPinTap: onPinTap,

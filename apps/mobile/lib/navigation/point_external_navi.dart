@@ -54,6 +54,9 @@ abstract final class PointExternalNavi {
     if (preferredProvider == MapProviderId.naver) {
       return [naver, tmap, kakaoNavi, kakaoMap, geo];
     }
+    if (preferredProvider == MapProviderId.tmap) {
+      return [tmap, kakaoNavi, kakaoMap, naver, geo];
+    }
     return [kakaoNavi, kakaoMap, tmap, naver, geo];
   }
 

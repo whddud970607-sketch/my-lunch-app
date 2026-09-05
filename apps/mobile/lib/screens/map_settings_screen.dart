@@ -5,6 +5,7 @@ import '../location/driver_vehicle_type.dart';
 import '../map/map_provider_id.dart';
 import '../map/map_provider_settings.dart';
 import '../map/naver_map_feature.dart';
+import '../map/tmap_map_feature.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 
@@ -103,6 +104,21 @@ class _MapSettingsScreenState extends State<MapSettingsScreen> {
                   ),
                   selected: _selected == MapProviderId.naver,
                   onTap: () => _onSelect(MapProviderId.naver),
+                ),
+                ListTile(
+                  title: Text(MapProviderId.tmap.displayLabel),
+                  subtitle: Text(
+                    TmapMapFeature.isConfigured
+                        ? '선택 시 티맵 내비게이션으로 배송지를 엽니다'
+                        : '선택 가능 · 티맵 앱으로 배송지를 엽니다',
+                  ),
+                  leading: Icon(
+                    _selected == MapProviderId.tmap
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                  ),
+                  selected: _selected == MapProviderId.tmap,
+                  onTap: () => _onSelect(MapProviderId.tmap),
                 ),
                 const Divider(),
                 ListTile(

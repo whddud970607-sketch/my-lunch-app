@@ -57,6 +57,13 @@ void main() {
     );
     expect(uris, isNotEmpty);
     expect(uris.first.scheme, 'kakaonavi');
+    final tmapFirst = PointExternalNavi.buildCandidates(
+      latitude: lat,
+      longitude: lng,
+      name: '구월동 1',
+      preferredProvider: MapProviderId.tmap,
+    );
+    expect(tmapFirst.first.scheme, 'tmap');
     expect(
       uris.any((u) => u.toString().contains('$lat') && u.toString().contains('$lng')),
       isTrue,

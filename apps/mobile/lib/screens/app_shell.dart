@@ -36,6 +36,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
   final ValueNotifier<int> _tabIndex = ValueNotifier(0);
+  final ValueNotifier<int> _worksetRefreshTick = ValueNotifier(0);
 
   static const _tabCount = 5;
 
@@ -47,6 +48,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _tabIndex.dispose();
+    _worksetRefreshTick.dispose();
     super.dispose();
   }
 
@@ -60,6 +62,7 @@ class _AppShellState extends State<AppShell> {
       ),
     );
     if (result != null && mounted) {
+      _worksetRefreshTick.value++;
       _goToTab(AppShellTabs.delivery);
     }
   }
@@ -78,12 +81,14 @@ class _AppShellState extends State<AppShell> {
           dataSource: DeliveryMapDataSource.today,
           driverId: widget.controller.me?.driver?.id,
           serviceDate: AppConfig.instance.todayServiceDateOverride,
+          refreshTick: _worksetRefreshTick,
           onSelectTab: _goToTab,
         );
       case AppShellTabs.delivery:
         return DeliveryListScreen(
           controller: widget.controller,
           onSelectTab: _goToTab,
+          refreshTick: _worksetRefreshTick,
         );
       case AppShellTabs.scan:
         return ScannerScreen(

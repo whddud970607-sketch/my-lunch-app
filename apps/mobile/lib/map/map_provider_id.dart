@@ -4,7 +4,7 @@
 enum MapProviderId {
   kakao,
   naver,
-  // Reserved for later: tmap,
+  tmap,
 }
 
 extension MapProviderIdX on MapProviderId {
@@ -13,6 +13,7 @@ extension MapProviderIdX on MapProviderId {
   String get displayLabel => switch (this) {
         MapProviderId.kakao => '카카오맵',
         MapProviderId.naver => '네이버지도',
+        MapProviderId.tmap => '티맵',
       };
 
   static MapProviderId? tryParse(String? raw) {

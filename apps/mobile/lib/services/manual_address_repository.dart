@@ -1,7 +1,8 @@
 import '../models/manual_address_candidate.dart';
+import '../screens/manual_address_register_data.dart';
 import 'api_client.dart';
 
-/// Nest manual-address APIs. Does not call GET /delivery/today/search.
+/// Nest manual-address APIs. Does not call Phase B assigned-point search.
 class ManualAddressRepository {
   ManualAddressRepository(this._api);
 
@@ -29,6 +30,11 @@ class ManualAddressRepository {
     required int quantity,
     String? serviceDate,
   }) {
+    final normalizedDetail = composeManualDetailAddress(
+      detail: detailAddress,
+      dong: dong,
+      unit: unit,
+    );
     return _api
         .postJson('/delivery/manual/register', {
           'commitIdempotencyKey': commitIdempotencyKey,
@@ -37,9 +43,9 @@ class ManualAddressRepository {
           'roadAddress': candidate.roadAddress,
           'jibunAddress': candidate.jibunAddress,
           'buildingName': candidate.buildingName,
-          'detailAddress': detailAddress,
-          'dong': dong,
-          'unit': unit,
+          'detailAddress': normalizedDetail.isEmpty ? null : normalizedDetail,
+          'dong': (dong ?? '').trim(),
+          'unit': (unit ?? '').trim(),
           'quantity': quantity,
         })
         .then(ManualRegisterResult.fromJson);

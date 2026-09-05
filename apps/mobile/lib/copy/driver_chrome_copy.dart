@@ -26,6 +26,12 @@ abstract final class DriverChromeCopy {
   static const manualRegistering = '등록 중';
   static const manualRegisterSuccess = '등록 성공';
   static const manualRegisterFailed = '등록 실패';
+  static const manualRegisterNeedLogin = '다시 로그인한 뒤 등록해 주세요.';
+  static const manualRegisterServerBusy =
+      '서버 준비 중이라 등록하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+  static const manualRegisterInvalidAddress = '주소 정보가 부족해 등록하지 못했습니다.';
+  static const manualRegisterMissingAddress = '선택한 주소가 비어 있습니다. 다시 검색해 주세요.';
+  static const manualRegisterBadQuantity = '수량을 확인해 주세요.';
   static const manualConfirmTitle = '목적지 확인';
   static const manualOffline = '인터넷에 연결한 뒤 다시 시도해 주세요.';
   static const openDeliveryList = '배송 목록';

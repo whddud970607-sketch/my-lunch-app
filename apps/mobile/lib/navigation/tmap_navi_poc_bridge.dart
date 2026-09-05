@@ -14,12 +14,18 @@ class TmapNaviPocBridge {
     String clientId = '',
     String userKey = '',
     String deviceKey = '',
+    double? destLatitude,
+    double? destLongitude,
+    String destName = '',
   }) async {
     await _channel.invokeMethod<void>('launch', {
       'apiKey': apiKey,
       'clientId': clientId,
       'userKey': userKey,
       'deviceKey': deviceKey,
+      ?destLatitude: destLatitude,
+      ?destLongitude: destLongitude,
+      if (destName.isNotEmpty) 'destName': destName,
     });
   }
 }

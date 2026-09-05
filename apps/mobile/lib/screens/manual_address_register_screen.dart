@@ -116,7 +116,7 @@ class _ManualAddressRegisterScreenState
     final qty = normalizeManualQuantity(_quantityController.text);
     if (qty < 0) {
       setState(() {
-        _submitError = DriverChromeCopy.manualRegisterFailed;
+        _submitError = DriverChromeCopy.manualRegisterBadQuantity;
         _offline = false;
       });
       return;
@@ -142,10 +142,12 @@ class _ManualAddressRegisterScreenState
       if (result.ok &&
           (result.resultCode == 'applied' || result.resultCode == 'duplicate')) {
         setState(() {
-          _submitLock = false;
           _submitting = false;
           _success = result;
         });
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(result);
+        }
         return;
       }
       setState(() {
@@ -159,9 +161,7 @@ class _ManualAddressRegisterScreenState
         _submitLock = false;
         _submitting = false;
         _offline = e.statusCode == null || isOfflineManualFailure(e);
-        _submitError = _offline
-            ? DriverChromeCopy.manualOffline
-            : DriverChromeCopy.manualRegisterFailed;
+        _submitError = manualRegisterErrorMessage(e);
       });
     } catch (e) {
       if (!mounted) return;
@@ -170,9 +170,7 @@ class _ManualAddressRegisterScreenState
         _submitLock = false;
         _submitting = false;
         _offline = offline;
-        _submitError = offline
-            ? DriverChromeCopy.manualOffline
-            : DriverChromeCopy.manualRegisterFailed;
+        _submitError = manualRegisterErrorMessage(e);
       });
     }
   }

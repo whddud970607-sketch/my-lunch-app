@@ -26,10 +26,12 @@ class DeliveryListScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.onSelectTab,
+    this.refreshTick,
   });
 
   final AuthController controller;
   final ValueChanged<int>? onSelectTab;
+  final ValueNotifier<int>? refreshTick;
 
   @override
   State<DeliveryListScreen> createState() => _DeliveryListScreenState();
@@ -57,11 +59,17 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
   @override
   void initState() {
     super.initState();
+    widget.refreshTick?.addListener(_onExternalRefresh);
     _loadToday(isRefresh: false);
+  }
+
+  void _onExternalRefresh() {
+    _loadToday(isRefresh: true);
   }
 
   @override
   void dispose() {
+    widget.refreshTick?.removeListener(_onExternalRefresh);
     _addressDebounce?.cancel();
     _searchController.dispose();
     super.dispose();

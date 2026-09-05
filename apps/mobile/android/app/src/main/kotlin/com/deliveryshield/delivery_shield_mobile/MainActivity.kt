@@ -64,6 +64,16 @@ class MainActivity : FlutterActivity() {
                         TmapNaviPocActivity.EXTRA_DEVICE_KEY,
                         call.argument<String>("deviceKey")?.trim().orEmpty(),
                     )
+                    val destLat = call.argument<Number>("destLatitude")?.toDouble()
+                    val destLng = call.argument<Number>("destLongitude")?.toDouble()
+                    if (destLat != null && destLng != null) {
+                        intent.putExtra(TmapNaviPocActivity.EXTRA_DEST_LAT, destLat)
+                        intent.putExtra(TmapNaviPocActivity.EXTRA_DEST_LNG, destLng)
+                        intent.putExtra(
+                            TmapNaviPocActivity.EXTRA_DEST_NAME,
+                            call.argument<String>("destName")?.trim().orEmpty(),
+                        )
+                    }
                     startActivity(intent)
                     result.success(null)
                 }

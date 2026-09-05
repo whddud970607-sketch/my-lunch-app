@@ -73,7 +73,7 @@ class MenuScreen extends StatelessWidget {
                 key: MenuKeys.mapSettings,
                 leading: const Icon(Icons.map_outlined),
                 title: const Text('지도 설정'),
-                subtitle: const Text('카카오맵 · 네이버지도 · 운송수단 아이콘'),
+                subtitle: const Text('카카오맵 · 네이버지도 · 티맵 · 운송수단 아이콘'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: onOpenMapSettings,
               ),

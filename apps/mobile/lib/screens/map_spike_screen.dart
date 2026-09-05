@@ -58,6 +58,7 @@ class MapSpikeScreen extends StatefulWidget {
     this.serviceDate,
     this.initialWorkset,
     this.onSelectTab,
+    this.refreshTick,
   });
 
   final ApiClient apiClient;
@@ -80,6 +81,7 @@ class MapSpikeScreen extends StatefulWidget {
 
   /// Optional AppShell tab switch (complete success → 배송 목록).
   final ValueChanged<int>? onSelectTab;
+  final ValueNotifier<int>? refreshTick;
 
   @override
   State<MapSpikeScreen> createState() => _MapSpikeScreenState();
@@ -127,7 +129,13 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _locationCoordinator.addListener(_onLocationCoordinatorChanged);
+    widget.refreshTick?.addListener(_onExternalRefresh);
     _bootstrap();
+  }
+
+  void _onExternalRefresh() {
+    if (!mounted) return;
+    _load(isRefresh: true);
   }
 
   @override
@@ -211,6 +219,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (_projections != null && _projectionListenerAttached) {
       _projections!.removeListener(_onProjectionsChanged);
     }
+    widget.refreshTick?.removeListener(_onExternalRefresh);
     WidgetsBinding.instance.removeObserver(this);
     _locationCoordinator.removeListener(_onLocationCoordinatorChanged);
     _locationCoordinator.dispose();
