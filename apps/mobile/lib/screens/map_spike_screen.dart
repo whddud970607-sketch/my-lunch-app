@@ -112,6 +112,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   TodayWorkset? _workset;
   WorksetMapFilter _filter = WorksetMapFilter.all;
+  String? _pendingFocusPointId;
   bool _detailOpen = false;
   final Set<String> _detailHydratedPointIds = {};
 
@@ -136,6 +137,26 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   void _onExternalRefresh() {
     if (!mounted) return;
     _load(isRefresh: true);
+  }
+
+  @override
+  void didUpdateWidget(MapSpikeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTick != oldWidget.refreshTick) {
+      oldWidget.refreshTick?.removeListener(_onExternalRefresh);
+      widget.refreshTick?.addListener(_onExternalRefresh);
+    }
+    final focusId = widget.focusPointId;
+    if (focusId != null &&
+        focusId.isNotEmpty &&
+        focusId != oldWidget.focusPointId) {
+      _pendingFocusPointId = focusId;
+      if (!_pointsById.containsKey(focusId) && !_loading) {
+        _load(isRefresh: true);
+      } else {
+        _applyFocusPoint(focusId);
+      }
+    }
   }
 
   @override
@@ -333,6 +354,10 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       if (isRefresh) {
         await _syncPinsToMap();
       }
+      final pendingFocus = _pendingFocusPointId ?? widget.focusPointId;
+      if (pendingFocus != null && pendingFocus.isNotEmpty) {
+        _applyFocusPoint(pendingFocus);
+      }
       await _locationCoordinator.loadVehicleType();
       final trackingOk = await _locationCoordinator.startTracking();
       if (!trackingOk && mounted && _locationCoordinator.permissionDenied) {
@@ -406,11 +431,21 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   void _onMapReady(DeliveryMapController controller) {
     _mapController = controller;
     _locationCoordinator.attachMap(controller);
-    final focusId = widget.focusPointId;
+    final focusId = widget.focusPointId ?? _pendingFocusPointId;
     if (focusId == null || focusId.isEmpty) return;
+    _applyFocusPoint(focusId);
+  }
+
+  void _applyFocusPoint(String focusId) {
+    final controller = _mapController;
     final point = _pointsById[focusId];
-    if (point == null) return;
+    if (controller == null || point == null) {
+      _pendingFocusPointId = focusId;
+      return;
+    }
+    _pendingFocusPointId = null;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
       await controller.moveCamera(
         DeliveryLatLng(
           latitude: point.latitude,

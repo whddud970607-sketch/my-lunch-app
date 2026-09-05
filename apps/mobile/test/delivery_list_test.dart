@@ -303,6 +303,7 @@ DeliveryListView _view({
   VoidCallback? onRetry,
   ValueChanged<WorksetPoint>? onPointTap,
   VoidCallback? onViewOnMap,
+  ValueChanged<WorksetPoint>? onViewPointOnMap,
 }) {
   return DeliveryListView(
     loadState: loadState,
@@ -323,6 +324,7 @@ DeliveryListView _view({
     onRetry: onRetry,
     onPointTap: onPointTap,
     onViewOnMap: onViewOnMap,
+    onViewPointOnMap: onViewPointOnMap,
   );
 }
 
@@ -459,6 +461,31 @@ void main() {
     expect(find.text('OO아파트 101동'), findsWidgets);
   });
 
+  test('map focus carries selected point coordinates', () {
+    final ws = _sampleWorkset();
+    final open = ws.points.firstWhere((p) => p.pointId == 'pt-open-1');
+    final focus = mapFocusForWorksetPoint(open);
+    expect(focus?.pointId, 'pt-open-1');
+    expect(focus?.latitude, 37.4);
+    expect(focus?.longitude, 126.7);
+
+    final missing = WorksetPoint.fromJson({
+      ...{
+        'pointId': 'pt-pending',
+        'jobId': 'job-a',
+        'status': 'pending',
+        'quantity': 1,
+        'displayLabel': 'no-pin',
+        'pinAccuracy': 'address',
+        'piiMasked': false,
+        'hasAccessInfo': false,
+        'shipmentCount': 1,
+        'contactAvailable': false,
+      },
+    });
+    expect(mapFocusForWorksetPoint(missing), isNull);
+  });
+
   testWidgets('MAP_ACTION switches via callback only', (tester) async {
     var map = 0;
     await _pump(
@@ -473,6 +500,22 @@ void main() {
     expect(map, 1);
     await tester.tap(find.byKey(DeliveryListKeys.pointMapAction('pt-open-1')));
     expect(map, 2);
+  });
+
+  testWidgets('point map action passes selected point coords', (tester) async {
+    WorksetPoint? focused;
+    await _pump(
+      tester,
+      _view(
+        loadState: HomeDashboardLoadState.loaded,
+        workset: _sampleWorkset(),
+        onViewPointOnMap: (point) => focused = point,
+      ),
+    );
+    await tester.tap(find.byKey(DeliveryListKeys.pointMapAction('pt-open-1')));
+    expect(focused?.pointId, 'pt-open-1');
+    expect(focused?.latitude, 37.4);
+    expect(focused?.longitude, 126.7);
   });
 
   testWidgets('error and stale reuse Home/Map copy', (tester) async {

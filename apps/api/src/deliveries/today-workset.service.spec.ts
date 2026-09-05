@@ -318,6 +318,10 @@ describe("TodayWorksetService.getToday", () => {
     expect(ptB.contactAvailable).toBe(false);
     expect(ptM.hasAccessInfo).toBe(false);
     expect(ptM.companyId).toBeNull();
+    expect(ptA.latitude).toBe(37.5);
+    expect(ptA.longitude).toBe(127.0);
+    expect(ptM.latitude).toBeNull();
+    expect(ptM.longitude).toBeNull();
 
     const blob = JSON.stringify(result);
     expect(blob).not.toMatch(
@@ -342,6 +346,21 @@ describe("TodayWorksetService.getToday", () => {
     expect(result.companies).toHaveLength(2);
     expect(result.companies.every((c) => c.displayName === "Twin")).toBe(true);
     expect(new Set(result.companies.map((c) => c.id)).size).toBe(2);
+  });
+
+  it("returns stored location for a manual point", async () => {
+    const tables = baseTables();
+    const manual = tables.points.find((p) => p.id === pointM);
+    expect(manual).toBeDefined();
+    manual!.location = { type: "Point", coordinates: [126.74, 37.42] };
+    const service = mockDeps({ accessPointIds: [] });
+    const result = await service.getToday(mockClient(tables), {
+      driverId: driverA,
+      serviceDate: "2026-08-30",
+    });
+    const ptM = result.points.find((p) => p.pointId === pointM)!;
+    expect(ptM.latitude).toBe(37.42);
+    expect(ptM.longitude).toBe(126.74);
   });
 
   it("hasAccessInfo false when secret absent", async () => {

@@ -274,6 +274,35 @@ void main() {
         'pt-m',
       );
     });
+
+    test('valid manual point is not dropped from markers', () {
+      expect(points.any((p) => p.pointId == 'pt-m'), isTrue);
+      final dropped = TodayWorkset.fromJson({
+        ..._sampleTodayJson(),
+        'points': [
+          {
+            'pointId': 'pt-m-no-coord',
+            'jobId': 'job-m',
+            'companyId': null,
+            'sourceId': 'src-m',
+            'status': 'pending',
+            'latitude': null,
+            'longitude': null,
+            'quantity': 1,
+            'displayLabel': 'Manual',
+            'pinAccuracy': 'address',
+            'piiMasked': false,
+            'hasAccessInfo': false,
+            'shipmentCount': 1,
+            'contactAvailable': false,
+          },
+        ],
+      });
+      expect(
+        TodayWorksetMapAdapter.toMapPoints(dropped, driverId: 'driver-1'),
+        isEmpty,
+      );
+    });
   });
 
   group('same-location', () {

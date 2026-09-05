@@ -132,6 +132,30 @@ export class DeliveriesRepository {
     return typeof id === "string" && id.length > 0 ? id : null;
   }
 
+  /**
+   * Persist Kakao suggest coords onto an existing point.
+   * Does not overwrite a location already set by worker or driver pin.
+   */
+  async applyManualSearchLocation(
+    admin: SupabaseClient,
+    args: { pointId: string; latitude: number; longitude: number },
+  ): Promise<boolean> {
+    const ewkt = `SRID=4326;POINT(${args.longitude} ${args.latitude})`;
+    const { error } = await admin
+      .from("delivery_points")
+      .update({ location: ewkt })
+      .eq("id", args.pointId)
+      .is("location", null);
+
+    if (error) {
+      this.logger.warn(
+        `manual search location persist failed code=${error.code}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
   /** Owned point lookup for pin adjust / complete (spike or fixture). */
   async findPointForDriver(
     userClient: SupabaseClient,

@@ -103,6 +103,19 @@ bool isOfflineManualFailure(Object error) {
       text.contains('timeout');
 }
 
+/// Search-result coords for register payload. Invalid/missing → omitted.
+Map<String, double> manualRegisterCoordinateFields(
+  ManualAddressCandidate candidate,
+) {
+  final lat = candidate.latitude;
+  final lng = candidate.longitude;
+  if (lat == null || lng == null) return const {};
+  if (!lat.isFinite || !lng.isFinite) return const {};
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return const {};
+  if (lat == 0 && lng == 0) return const {};
+  return {'latitude': lat, 'longitude': lng};
+}
+
 List<ManualAddressCandidate> parseManualSuggestResults(
   Map<String, dynamic> json,
 ) {

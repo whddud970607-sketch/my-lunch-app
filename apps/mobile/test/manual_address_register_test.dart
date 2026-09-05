@@ -69,6 +69,28 @@ class FakeManualRepo extends ManualAddressRepository {
 }
 
 void main() {
+  test('search coords are included on the register payload', () {
+    expect(
+      manualRegisterCoordinateFields(_candidate),
+      {'latitude': 37.42, 'longitude': 126.74},
+    );
+    expect(
+      manualRegisterCoordinateFields(
+        const ManualAddressCandidate(roadAddress: 'x'),
+      ),
+      isEmpty,
+    );
+    expect(
+      manualRegisterCoordinateFields(
+        const ManualAddressCandidate(
+          latitude: 91,
+          longitude: 126.74,
+        ),
+      ),
+      isEmpty,
+    );
+  });
+
   test('quantity defaults to 1 and compose dong/ho', () {
     expect(defaultManualQuantity(), 1);
     expect(normalizeManualQuantity(''), 1);

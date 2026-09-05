@@ -106,6 +106,7 @@ describe("DeliveryManualRegisterService", () => {
         maybeSingle: async () => ({ data: { id: SOURCE_ID }, error: null }),
       }),
     });
+    const applyManualSearchLocation = jest.fn().mockResolvedValue(true);
     const admin = {
       from: jest.fn((table: string) => {
         if (table === "delivery_sources") {
@@ -122,9 +123,10 @@ describe("DeliveryManualRegisterService", () => {
       } as unknown as SupabaseServiceClient,
       {
         findFirstPointIdForJob: jest.fn().mockResolvedValue(POINT_ID),
+        applyManualSearchLocation,
       } as unknown as DeliveriesRepository,
     );
-    return { svc, commit, findBySourceKey, insert };
+    return { svc, commit, findBySourceKey, insert, applyManualSearchLocation };
   }
 
   const body = {
@@ -202,6 +204,46 @@ describe("DeliveryManualRegisterService", () => {
         },
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("persists valid search coordinates onto the created point", async () => {
+    const { svc, commit, applyManualSearchLocation } = setup();
+    await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        latitude: 37.42,
+        longitude: 126.74,
+      },
+    });
+    const draft = commit.mock.calls[0][2].drafts[0];
+    expect(draft.latitude).toBe(37.42);
+    expect(draft.longitude).toBe(126.74);
+    expect(draft.geocodeProvider).toBe("kakao");
+    expect(draft.geocodeStatus).toBe("resolved");
+    expect(applyManualSearchLocation).toHaveBeenCalledWith(
+      expect.anything(),
+      { pointId: POINT_ID, latitude: 37.42, longitude: 126.74 },
+    );
+  });
+
+  it("leaves invalid coordinates pending and does not persist", async () => {
+    const { svc, commit, applyManualSearchLocation } = setup();
+    await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        latitude: 91,
+        longitude: 126.74,
+      },
+    });
+    const draft = commit.mock.calls[0][2].drafts[0];
+    expect(draft.latitude).toBeNull();
+    expect(draft.longitude).toBeNull();
+    expect(draft.geocodeStatus).toBe("pending");
+    expect(applyManualSearchLocation).not.toHaveBeenCalled();
   });
 
   it("isolates ensure to the JWT driver", async () => {

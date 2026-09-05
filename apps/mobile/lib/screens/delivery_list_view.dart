@@ -37,6 +37,7 @@ class DeliveryListView extends StatelessWidget {
     this.onRetry,
     this.onPointTap,
     this.onViewOnMap,
+    this.onViewPointOnMap,
   });
 
   final HomeDashboardLoadState loadState;
@@ -57,6 +58,7 @@ class DeliveryListView extends StatelessWidget {
   final VoidCallback? onRetry;
   final ValueChanged<WorksetPoint>? onPointTap;
   final VoidCallback? onViewOnMap;
+  final ValueChanged<WorksetPoint>? onViewPointOnMap;
 
   bool get _stale =>
       listError != null &&
@@ -226,7 +228,9 @@ class DeliveryListView extends StatelessWidget {
                                           onTap: onPointTap == null
                                               ? null
                                               : () => onPointTap!(point),
-                                          onViewOnMap: onViewOnMap,
+                                          onViewOnMap: onViewPointOnMap != null
+                                              ? () => onViewPointOnMap!(point)
+                                              : onViewOnMap,
                                         ),
                                       );
                                     },

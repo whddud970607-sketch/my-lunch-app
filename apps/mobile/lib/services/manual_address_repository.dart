@@ -2,6 +2,7 @@ import '../models/manual_address_candidate.dart';
 import '../screens/manual_address_register_data.dart';
 import 'api_client.dart';
 
+
 /// Nest manual-address APIs. Does not call Phase B assigned-point search.
 class ManualAddressRepository {
   ManualAddressRepository(this._api);
@@ -47,6 +48,7 @@ class ManualAddressRepository {
           'dong': (dong ?? '').trim(),
           'unit': (unit ?? '').trim(),
           'quantity': quantity,
+          ...manualRegisterCoordinateFields(candidate),
         })
         .then(ManualRegisterResult.fromJson);
   }

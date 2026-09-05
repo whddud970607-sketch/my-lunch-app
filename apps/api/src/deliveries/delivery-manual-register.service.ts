@@ -17,6 +17,7 @@ import {
   DRIVER_MANUAL_SOURCE_KEY,
   manualTrackingFromIdempotencyKey,
 } from "./delivery-manual-identifier";
+import { sanitizeManualCoordinates } from "./manual-register-coordinates";
 import { parseServiceDateParam } from "./today-workset.service";
 
 export type ManualRegisterRequest = {
@@ -29,6 +30,9 @@ export type ManualRegisterRequest = {
   dong?: string | null;
   unit?: string | null;
   quantity?: number;
+  /** From server Kakao suggest. Validated; invalid → pending resolution. */
+  latitude?: number | string | null;
+  longitude?: number | string | null;
 };
 
 export type ManualRegisterResponse = {
@@ -119,6 +123,10 @@ export class DeliveryManualRegisterService {
     const buildingName = emptyToNull(args.body.buildingName);
     const detail = composeManualDongHoDetail(args.body);
     const displayLabel = buildingName ?? addressRaw;
+    const coords = sanitizeManualCoordinates(
+      args.body.latitude,
+      args.body.longitude,
+    );
 
     const draft: NormalizedDeliveryDraft = {
       rowIndex: 0,
@@ -138,11 +146,11 @@ export class DeliveryManualRegisterService {
       deliveryMemo: null,
       displayLabel,
       barcodeRaw: null,
-      latitude: null,
-      longitude: null,
-      geocodeConfidence: null,
-      geocodeProvider: null,
-      geocodeStatus: "pending",
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
+      geocodeConfidence: coords ? 1 : null,
+      geocodeProvider: coords ? "kakao" : null,
+      geocodeStatus: coords ? "resolved" : "pending",
       issues: [],
     };
 
@@ -173,6 +181,25 @@ export class DeliveryManualRegisterService {
         args.driverId,
         jobId,
       );
+    }
+
+    if (coords && pointId) {
+      const admin = this.serviceSb.getOrNull();
+      if (admin) {
+        const persisted = await this.deliveries.applyManualSearchLocation(
+          admin,
+          {
+            pointId,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          },
+        );
+        if (!persisted) {
+          this.logger.warn("manual_search_location_persist_failed");
+        }
+      } else {
+        this.logger.warn("manual_search_location_persist_unavailable");
+      }
     }
 
     return {

@@ -35,14 +35,26 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+  String? _mapFocusPointId;
   final ValueNotifier<int> _tabIndex = ValueNotifier(0);
   final ValueNotifier<int> _worksetRefreshTick = ValueNotifier(0);
 
   static const _tabCount = 5;
 
   void _goToTab(int index) {
-    setState(() => _index = index);
+    setState(() {
+      _mapFocusPointId = null;
+      _index = index;
+    });
     _tabIndex.value = index;
+  }
+
+  void _goToMap({String? focusPointId}) {
+    setState(() {
+      _mapFocusPointId = focusPointId;
+      _index = AppShellTabs.map;
+    });
+    _tabIndex.value = AppShellTabs.map;
   }
 
   @override
@@ -82,12 +94,14 @@ class _AppShellState extends State<AppShell> {
           driverId: widget.controller.me?.driver?.id,
           serviceDate: AppConfig.instance.todayServiceDateOverride,
           refreshTick: _worksetRefreshTick,
+          focusPointId: _mapFocusPointId,
           onSelectTab: _goToTab,
         );
       case AppShellTabs.delivery:
         return DeliveryListScreen(
           controller: widget.controller,
           onSelectTab: _goToTab,
+          onViewPointOnMap: (point) => _goToMap(focusPointId: point.pointId),
           refreshTick: _worksetRefreshTick,
         );
       case AppShellTabs.scan:

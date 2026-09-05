@@ -91,8 +91,29 @@ String deliveryPointMeta(WorksetPoint point) {
 
 String deliveryPointTitle(WorksetPoint point) => pointCardTitle(point);
 
-/// Existing detail panel domain. Lat/lng are constructor-only; list never
-/// invents a focus coordinate for the map tab.
+class DeliveryMapFocus {
+  const DeliveryMapFocus({
+    required this.pointId,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String pointId;
+  final double latitude;
+  final double longitude;
+}
+
+/// Passes a selected list point to the map tab only when coords exist.
+DeliveryMapFocus? mapFocusForWorksetPoint(WorksetPoint point) {
+  if (!point.hasCoordinates) return null;
+  return DeliveryMapFocus(
+    pointId: point.pointId,
+    latitude: point.latitude!,
+    longitude: point.longitude!,
+  );
+}
+
+/// Existing detail panel domain. Lat/lng come from the workset point.
 MapSpikePoint worksetPointToDetailPoint({
   required TodayWorkset workset,
   required WorksetPoint point,

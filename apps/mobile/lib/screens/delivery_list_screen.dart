@@ -26,11 +26,13 @@ class DeliveryListScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.onSelectTab,
+    this.onViewPointOnMap,
     this.refreshTick,
   });
 
   final AuthController controller;
   final ValueChanged<int>? onSelectTab;
+  final ValueChanged<WorksetPoint>? onViewPointOnMap;
   final ValueNotifier<int>? refreshTick;
 
   @override
@@ -197,6 +199,14 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
 
   void _openMapTab() => widget.onSelectTab?.call(AppShellTabs.map);
 
+  void _openPointOnMap(WorksetPoint point) {
+    if (widget.onViewPointOnMap != null) {
+      widget.onViewPointOnMap!(point);
+      return;
+    }
+    _openMapTab();
+  }
+
   Future<void> _navigateToPoint(MapSpikePoint point) async {
     if (!PointExternalNavi.hasValidDestination(point)) return;
     final ok = await PointExternalNavi.open(
@@ -334,6 +344,7 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
           onRetry: () => _loadToday(isRefresh: false),
           onPointTap: _openDetail,
           onViewOnMap: _openMapTab,
+          onViewPointOnMap: _openPointOnMap,
         ),
       ),
     );
