@@ -1,0 +1,52 @@
+# Delivery Shield staging Nest API — persistent Node process (not serverless).
+# Secrets are NOT stored here. Set them in the Render dashboard (sync: false).
+services:
+  - type: web
+    name: delivery-shield-api-staging
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: apps/api
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /v1/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: staging
+      - key: ALLOW_STUB_IDENTITY_IN_STAGING
+        value: "false"
+      - key: HOST
+        value: 0.0.0.0
+      - key: RESOLUTION_WORKER_ENABLED
+        value: "0"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: KAKAO_REST_API_KEY
+        sync: false
+      - key: ACCESS_INFO_KEY
+        sync: false
+      - key: IDENTITY_PROVIDER
+        sync: false
+      - key: STUB_IDENTITY_OTP
+        sync: false
+      - key: NAVER_MAP_CLIENT_ID
+        sync: false
+      - key: NAVER_MAP_CLIENT_SECRET
+        sync: false
+      - key: VWORLD_API_KEY
+        sync: false
+      - key: VWORLD_DOMAIN
+        sync: false
+      - key: DATA_GO_KR_SERVICE_KEY
+        sync: false
+      - key: WORKDAY_EXECUTION_SESSION_V1
+        sync: false

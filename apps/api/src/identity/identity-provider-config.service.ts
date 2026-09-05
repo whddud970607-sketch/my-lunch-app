@@ -1,5 +1,10 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  assertStubIdentityAllowed,
+  parseExplicitFlag,
+  resolveIdentityAppEnv,
+} from "./identity-runtime-env";
 
 export type IdentityProviderKind = "stub";
 
@@ -9,12 +14,18 @@ export class IdentityProviderConfigService implements OnModuleInit {
 
   onModuleInit() {
     const provider = this.getProviderKind();
-    const nodeEnv = this.config.get<string>("NODE_ENV") ?? "development";
+    const appEnv = resolveIdentityAppEnv({
+      appEnv: this.config.get<string>("APP_ENV"),
+      nodeEnv: this.config.get<string>("NODE_ENV") ?? "development",
+    });
 
-    if (nodeEnv === "production" && provider === "stub") {
-      throw new Error(
-        "IDENTITY_PROVIDER=stub is forbidden in production. Configure a real identity provider.",
-      );
+    if (provider === "stub") {
+      assertStubIdentityAllowed({
+        appEnv,
+        allowStubInStaging: parseExplicitFlag(
+          this.config.get<string>("ALLOW_STUB_IDENTITY_IN_STAGING"),
+        ),
+      });
     }
 
     if (provider === "stub" && !this.getStubOtp()) {
