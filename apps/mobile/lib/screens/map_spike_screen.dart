@@ -8,6 +8,7 @@ import '../config/device_abi.dart';
 import '../map/delivery_location_pin.dart';
 import '../map/delivery_map_controller.dart';
 import '../map/delivery_map_surface.dart';
+import '../map/map_host_policy.dart';
 import '../map/map_location_coordinator.dart';
 import '../map/map_provider_id.dart';
 import '../map/map_provider_settings.dart';
@@ -109,6 +110,10 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   bool _refreshing = false;
   String? _adjustingPointId;
   int _mapHostGeneration = 0;
+  bool _tickerOn = true;
+  bool _nativeReady = false;
+  int _nativeReadyRetries = 0;
+  Timer? _nativeReadyTimeout;
 
   TodayWorkset? _workset;
   WorksetMapFilter _filter = WorksetMapFilter.all;
@@ -131,7 +136,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     WidgetsBinding.instance.addObserver(this);
     _locationCoordinator.addListener(_onLocationCoordinatorChanged);
     widget.refreshTick?.addListener(_onExternalRefresh);
+    debugPrint('[MAP] screen build');
     _bootstrap();
+    _armNativeReadyTimeout();
   }
 
   void _onExternalRefresh() {
@@ -162,6 +169,18 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Always read TickerMode so IndexedStack visibility changes notify us.
+    // Must not early-return before this — otherwise offstage→onstage never recreates.
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (MapHostPolicy.shouldRecreateAfterOffstage(
+          becameVisible: visible && !_tickerOn,
+          nativeReady: _nativeReady,
+        )) {
+      debugPrint('[MAP] offstage return recreate');
+      _recreateNativeMap('offstage');
+    }
+    _tickerOn = visible;
+
     final projections = SyncScope.maybeOf(context)?.projections;
     if (identical(projections, _projections)) return;
     if (_projections != null && _projectionListenerAttached) {
@@ -215,11 +234,13 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-        if (!_loading && _error == null) {
-          _locationCoordinator.loadVehicleType().then((_) {
-            _locationCoordinator.startTracking();
-          });
+        // PlatformViews often blank after background; remount host.
+        if (_tickerOn) {
+          _recreateNativeMap('app_resume');
         }
+        _locationCoordinator.loadVehicleType().then((_) {
+          _locationCoordinator.startTracking();
+        });
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
@@ -229,10 +250,16 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   }
 
   Future<void> _bootstrap() async {
+    unawaited(_load(isRefresh: false));
     final saved = await MapProviderSettings.load();
-    if (!mounted) return;
-    setState(() => _mapProviderId = saved);
-    await _load(isRefresh: false);
+    if (!mounted || saved == _mapProviderId) return;
+    setState(() {
+      _mapProviderId = saved;
+      _mapController = null;
+      _nativeReady = false;
+      _mapHostGeneration++;
+    });
+    _armNativeReadyTimeout();
   }
 
   @override
@@ -246,8 +273,34 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     _locationCoordinator.dispose();
     _selectedMarkerId.dispose();
     _selectedPointId.dispose();
+    _nativeReadyTimeout?.cancel();
     _pinAdjustMode.dispose();
     super.dispose();
+  }
+
+  void _armNativeReadyTimeout() {
+    _nativeReadyTimeout?.cancel();
+    _nativeReadyTimeout = Timer(MapHostPolicy.nativeReadyTimeout, () {
+      if (!mounted || _nativeReady) return;
+      if (!MapHostPolicy.shouldRetryNativeReady(
+        nativeReady: _nativeReady,
+        retries: _nativeReadyRetries,
+      )) {
+        return;
+      }
+      _nativeReadyRetries += 1;
+      debugPrint('[MAP] ready timeout retry=$_nativeReadyRetries');
+      _recreateNativeMap('ready_timeout');
+    });
+  }
+
+  void _recreateNativeMap(String reason) {
+    debugPrint('[MAP] recreate reason=$reason');
+    _nativeReady = false;
+    _mapController = null;
+    if (!mounted) return;
+    setState(() => _mapHostGeneration++);
+    _armNativeReadyTimeout();
   }
 
   void _rebuildPins() {
@@ -287,7 +340,6 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       _selectedPointId.value = null;
       _pointsById.clear();
       _pinsByMarkerId.clear();
-      _mapController = null;
     }
 
     try {
@@ -339,9 +391,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       _rebuildPins();
       final markerMs = markerSw.elapsedMilliseconds;
       debugPrint(
-        '[timing] api_ms=$apiMs data_to_markers_ms=$markerMs '
-        'points=${_pointsById.length} pins=${_pinsByMarkerId.length} '
-        'source=${_effectiveSource.name}',
+        '[MAP] workset loaded api_ms=$apiMs data_to_markers_ms=$markerMs '
+        'points=${_pointsById.length} pins=${_pinsByMarkerId.length}',
       );
 
       if (!mounted) return;
@@ -349,11 +400,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         _loading = false;
         _refreshing = false;
         _error = null;
-        if (!isRefresh) _mapHostGeneration++;
       });
-      if (isRefresh) {
-        await _syncPinsToMap();
-      }
+      await _syncPinsToMap();
       final pendingFocus = _pendingFocusPointId ?? widget.focusPointId;
       if (pendingFocus != null && pendingFocus.isNotEmpty) {
         if (_pointsById.containsKey(pendingFocus)) {
@@ -429,8 +477,13 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   }
 
   void _onMapReady(DeliveryMapController controller) {
+    debugPrint('[MAP] native ready');
+    _nativeReady = true;
+    _nativeReadyRetries = 0;
+    _nativeReadyTimeout?.cancel();
     _mapController = controller;
     _locationCoordinator.attachMap(controller);
+    unawaited(_syncPinsToMap());
     final focusId = widget.focusPointId ?? _pendingFocusPointId;
     if (focusId == null || focusId.isEmpty) return;
     _applyFocusPoint(focusId);
@@ -444,6 +497,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       return;
     }
     _pendingFocusPointId = null;
+    debugPrint('[MAP] focus applied');
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await controller.moveCamera(
@@ -743,8 +797,11 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     setState(() {
       _mapProviderId = id;
       _mapController = null;
+      _nativeReady = false;
+      _nativeReadyRetries = 0;
       _mapHostGeneration++;
     });
+    _armNativeReadyTimeout();
     _selectedMarkerId.value = selected;
     _selectedPointId.value = selectedPoint;
     if (mounted) {
@@ -807,13 +864,30 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     return Stack(
       fit: StackFit.expand,
       children: [
-        DeliveryMapSurface(
-          key: ValueKey('map-surface-$_mapProviderId-$_mapHostGeneration'),
-          providerId: _mapProviderId,
-          initialTarget: initial,
-          pins: pins,
-          onPinTap: _onPinTap,
-          onReady: _onMapReady,
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth > 0 && constraints.maxHeight > 0) {
+                debugPrint(
+                  '[MAP] surface constraints '
+                  '${constraints.maxWidth.toStringAsFixed(0)}x'
+                  '${constraints.maxHeight.toStringAsFixed(0)}',
+                );
+              } else {
+                debugPrint('[MAP] surface ZERO size');
+              }
+              return DeliveryMapSurface(
+                key: ValueKey(
+                  'map-surface-$_mapProviderId-$_mapHostGeneration',
+                ),
+                providerId: _mapProviderId,
+                initialTarget: initial,
+                pins: pins,
+                onPinTap: _onPinTap,
+                onReady: _onMapReady,
+              );
+            },
+          ),
         ),
         overlay,
         if (showLoading) const MapLoadingPanel(),

@@ -59,9 +59,9 @@ describe("KakaoGeocodeAdapter", () => {
 
     expect(candidates).toHaveLength(1);
     expect(candidates[0].coordinateType).toBe("BUILDING_CANDIDATE");
-    expect(candidates[0].resolvedDong).toBe("609");
+    expect(candidates[0].resolvedDong).toBe("609동");
     expect(candidates[0].provider).toBe("kakao");
-    expect(candidates[0].evidence).toContain("kakao_keyword_apartment_dong");
+    expect(candidates[0].evidence).toContain("kakao_keyword_apartment_dong_exact");
     expect(candidates[0].coordinateType).not.toBe("BUILDING_VERIFIED");
   });
 
@@ -91,6 +91,62 @@ describe("KakaoGeocodeAdapter", () => {
 
     expect(candidates[0].coordinateType).toBe("BUILDING_CANDIDATE");
     expect(candidates[0].sourceType).toBe("address");
+  });
+
+  it("lookupApartmentDong accepts exact 504동 and rejects leading 501동", async () => {
+    const fetchFn = jest.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        documents: [
+          {
+            x: "126.10",
+            y: "37.10",
+            place_name: "샘플아파트 501동",
+            category_name: "부동산 > 아파트 동",
+          },
+          {
+            x: "126.11",
+            y: "37.11",
+            place_name: "샘플아파트 504동",
+            category_name: "부동산 > 아파트 동",
+          },
+        ],
+      }),
+    });
+    const adapter = new KakaoGeocodeAdapter("test-key", fetchFn);
+    await expect(
+      adapter.lookupApartmentDong({
+        buildingName: "샘플아파트",
+        dong: "504",
+        latitude: 37.1,
+        longitude: 126.1,
+      }),
+    ).resolves.toEqual({ latitude: 37.11, longitude: 126.11 });
+  });
+
+  it("lookupApartmentDong rejects 501동 when 504동 was requested", async () => {
+    const fetchFn = jest.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        documents: [
+          {
+            x: "126.10",
+            y: "37.10",
+            place_name: "샘플아파트 501동",
+            category_name: "부동산 > 아파트 동",
+          },
+        ],
+      }),
+    });
+    const adapter = new KakaoGeocodeAdapter("test-key", fetchFn);
+    await expect(
+      adapter.lookupApartmentDong({
+        buildingName: "샘플아파트",
+        dong: "504동",
+        latitude: 37.1,
+        longitude: 126.1,
+      }),
+    ).resolves.toBeNull();
   });
 
   it("searchAddressDocuments maps all public address docs", async () => {

@@ -38,6 +38,26 @@ export type ManualCoordSource =
   | "apartment_dong"
   | "base_address";
 
+export type CoordinateSource =
+  | "user_adjusted"
+  | "provider_dong_exact"
+  | "provider_base_address"
+  | "worker"
+  | "pending";
+
+export function toCoordinateSource(
+  source: ManualCoordSource,
+): CoordinateSource {
+  switch (source) {
+    case "manual_adjust":
+      return "user_adjusted";
+    case "apartment_dong":
+      return "provider_dong_exact";
+    case "base_address":
+      return "provider_base_address";
+  }
+}
+
 /** User pin > dong keyword > base address. Never invent coords. */
 export function pickManualCoordinatePriority(args: {
   adjusted: ManualCoordinates | null;

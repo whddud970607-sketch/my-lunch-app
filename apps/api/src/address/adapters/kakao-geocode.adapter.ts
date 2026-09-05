@@ -4,6 +4,11 @@ import type {
   ParsedAddress,
 } from "../address.types";
 import type { GeocodeProvider } from "../ports/geocode-provider.port";
+import {
+  normalizeCanonicalDong,
+  selectExactApartmentDongHit,
+  type KakaoKeywordPlace,
+} from "../apartment-dong-match";
 
 type KakaoAddressDoc = {
   x?: string;
@@ -23,13 +28,7 @@ export type KakaoAddressSearchDocument = {
   longitude: number | null;
 };
 
-type KakaoKeywordDoc = {
-  x?: string;
-  y?: string;
-  place_name?: string;
-  category_name?: string;
-  id?: string;
-};
+type KakaoKeywordDoc = KakaoKeywordPlace;
 
 export type KakaoFetchFn = (
   url: string,
@@ -89,27 +88,22 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
   }): Promise<{ latitude: number; longitude: number } | null> {
     if (!this.isConfigured()) return null;
     const building = args.buildingName.trim();
-    const dong = args.dong.replace(/동$/u, "").trim();
-    if (!building || !dong) return null;
+    const canonicalDong = normalizeCanonicalDong(args.dong);
+    if (!building || !canonicalDong) return null;
     if (!Number.isFinite(args.latitude) || !Number.isFinite(args.longitude)) {
       return null;
     }
     try {
       const places = await this.kakaoKeyword(
         this.restApiKey!.trim(),
-        `${building} ${dong}동`,
+        `${building} ${canonicalDong}`,
         { x: args.longitude, y: args.latitude, radius: 1000 },
       );
-      const hit = places.find(
-        (p) =>
-          String(p.category_name || "").includes("아파트 동") &&
-          String(p.place_name || "").includes(`${dong}동`),
-      );
-      if (!hit?.x || !hit?.y) return null;
-      const latitude = Number(hit.y);
-      const longitude = Number(hit.x);
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-      return { latitude, longitude };
+      return selectExactApartmentDongHit({
+        buildingName: building,
+        dong: canonicalDong,
+        documents: places,
+      });
     } catch {
       return null;
     }
@@ -130,37 +124,37 @@ export class KakaoGeocodeAdapter implements GeocodeProvider {
     const dong = parsed.dong;
     const now = new Date().toISOString();
 
-    if (dong && building) {
+    const canonicalDong = normalizeCanonicalDong(dong);
+    if (canonicalDong && building) {
       const places = await this.kakaoKeyword(
         restKey,
-        `${building} ${dong}동`,
+        `${building} ${canonicalDong}`,
         {
           x: addr.longitude,
           y: addr.latitude,
           radius: 1000,
         },
       );
-      const dongPlace = places.find(
-        (p) =>
-          String(p.category_name || "").includes("아파트 동") &&
-          String(p.place_name || "").includes(`${dong}동`),
-      );
-      if (dongPlace?.x && dongPlace?.y) {
+      const exact = selectExactApartmentDongHit({
+        buildingName: building,
+        dong: canonicalDong,
+        documents: places,
+      });
+      if (exact) {
         return [
           this.toCandidate({
-            latitude: Number(dongPlace.y),
-            longitude: Number(dongPlace.x),
+            latitude: exact.latitude,
+            longitude: exact.longitude,
             coordinateType: "BUILDING_CANDIDATE",
-            sourceType: "keyword_apartment_dong",
+            sourceType: "keyword_apartment_dong_exact",
             confidence: 0.82,
             evidence: [
-              "kakao_keyword_apartment_dong",
+              "kakao_keyword_apartment_dong_exact",
               "LOW_QUALITY_CANDIDATE_EVIDENCE",
               "NOT_BUILDING_IDENTITY_AUTHORITY",
-              `place=${dongPlace.place_name ?? "unknown"}`,
             ],
-            resolvedDong: dong,
-            providerPlaceId: dongPlace.id ?? null,
+            resolvedDong: canonicalDong,
+            providerPlaceId: null,
             createdAt: now,
           }),
         ];

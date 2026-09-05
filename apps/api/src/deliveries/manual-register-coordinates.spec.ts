@@ -2,6 +2,7 @@ import {
   pickManualCoordinatePriority,
   sanitizeManualCoordinates,
   shouldOverwriteExistingManualLocation,
+  toCoordinateSource,
   toLocationEwkt,
 } from "./manual-register-coordinates";
 
@@ -43,6 +44,12 @@ describe("sanitizeManualCoordinates", () => {
       baseAddress: { latitude: 37.3, longitude: 126.3 },
     });
     expect(picked?.source).toBe("apartment_dong");
+  });
+
+  it("maps coord sources to persisted metadata names", () => {
+    expect(toCoordinateSource("manual_adjust")).toBe("user_adjusted");
+    expect(toCoordinateSource("apartment_dong")).toBe("provider_dong_exact");
+    expect(toCoordinateSource("base_address")).toBe("provider_base_address");
   });
 
   it("overwrites stored location only for a driver-adjusted pin", () => {

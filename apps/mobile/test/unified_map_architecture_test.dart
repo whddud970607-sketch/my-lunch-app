@@ -77,10 +77,25 @@ void main() {
     expect(overlay.contains('UnifiedMapKeys.refresh'), isTrue);
   });
 
+  test('MAP_OFFSTAGE_RECREATE_SUBSCRIBES_TICKER', () {
+    final map = File('lib/screens/map_spike_screen.dart').readAsStringSync();
+    expect(map.contains('TickerMode.valuesOf(context)'), isTrue);
+    expect(map.contains("recreateNativeMap('offstage')"), isTrue);
+    expect(map.contains("recreateNativeMap('app_resume')"), isTrue);
+    // Projections must not short-circuit visibility handling.
+    final deps = map.split('void didChangeDependencies()')[1].split('@override')[0];
+    final tickerIdx = deps.indexOf('TickerMode.valuesOf');
+    final earlyReturnIdx = deps.indexOf('identical(projections');
+    expect(tickerIdx, greaterThanOrEqualTo(0));
+    expect(earlyReturnIdx, greaterThan(tickerIdx));
+  });
+
   test('MAP_LOADING_STATE_PRESERVED', () {
     final map = File('lib/screens/map_spike_screen.dart').readAsStringSync();
     expect(map.contains('MapLoadingPanel'), isTrue);
     expect(map.contains('_loading && _pointsById.isEmpty'), isTrue);
+    expect(map.contains('if (!isRefresh) _mapHostGeneration++'), isFalse);
+    expect(map.contains('Positioned.fill'), isTrue);
   });
 
   test('MAP_ERROR_STATE_PRESERVED', () {
