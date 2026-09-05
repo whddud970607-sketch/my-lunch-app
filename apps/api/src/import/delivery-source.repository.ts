@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { summarizeSupabaseError } from "../supabase/supabase-error-log";
 import type {
   DeliverySourceType,
   ResolvedImportSource,
@@ -31,7 +32,9 @@ export class DeliverySourceRepository {
       .maybeSingle();
 
     if (error) {
-      this.logger.warn(`delivery_sources lookup failed code=${error.code}`);
+      this.logger.warn(
+        `delivery_sources lookup failed ${summarizeSupabaseError(error)}`,
+      );
       return null;
     }
 
@@ -62,7 +65,9 @@ export class DeliverySourceRepository {
 
     const { data, error } = await query;
     if (error) {
-      this.logger.warn(`delivery_sources key lookup failed code=${error.code}`);
+      this.logger.warn(
+        `delivery_sources key lookup failed ${summarizeSupabaseError(error)}`,
+      );
       return [];
     }
 

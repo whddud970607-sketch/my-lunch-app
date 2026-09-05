@@ -9,6 +9,7 @@ import { composeDetailAddressWithComplex } from "../import/import-detail-compose
 import { DeliverySourceRepository } from "../import/delivery-source.repository";
 import { ImportCommitService } from "../import/import-commit.service";
 import type { NormalizedDeliveryDraft } from "../import/import.types";
+import { summarizeSupabaseError } from "../supabase/supabase-error-log";
 import { SupabaseServiceClient } from "../supabase/supabase-service.client";
 import { DeliveriesRepository } from "./deliveries.repository";
 import {
@@ -205,7 +206,9 @@ export class DeliveryManualRegisterService {
       .maybeSingle();
 
     if (error && error.code !== "23505") {
-      this.logger.warn(`manual_source_insert_failed code=${error.code}`);
+      this.logger.warn(
+        `manual_source_insert_failed ${summarizeSupabaseError(error)}`,
+      );
       throw new ServiceUnavailableException("source_ensure_failed");
     }
 

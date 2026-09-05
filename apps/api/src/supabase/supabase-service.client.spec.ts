@@ -28,6 +28,19 @@ describe("SupabaseServiceClient eager-init audit", () => {
     expect(client.getOrNull()).toBeNull();
   });
 
+  it("quoted/padded service-role env still initializes a client", () => {
+    const config = {
+      get: (key: string) => {
+        if (key === "SUPABASE_URL") return '  "https://example.supabase.co"  ';
+        if (key === "SUPABASE_SERVICE_ROLE_KEY") return '  "test-role-key-not-real"  ';
+        return undefined;
+      },
+    } as unknown as ConfigService;
+
+    const client = new SupabaseServiceClient(config);
+    expect(client.getOrNull()).not.toBeNull();
+  });
+
   it("both URL and service-role present → client object created without network I/O", () => {
     const config = {
       get: (key: string) => {

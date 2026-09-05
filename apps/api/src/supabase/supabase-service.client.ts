@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { normalizeConfigSecret } from "./supabase-error-log";
 
 /**
  * Service-role client for rare server-only operations
@@ -25,8 +26,10 @@ export class SupabaseServiceClient implements OnModuleInit {
 
   private initialize(): void {
     if (this.client) return;
-    const url = this.config.get<string>("SUPABASE_URL");
-    const key = this.config.get<string>("SUPABASE_SERVICE_ROLE_KEY");
+    const url = normalizeConfigSecret(this.config.get<string>("SUPABASE_URL"));
+    const key = normalizeConfigSecret(
+      this.config.get<string>("SUPABASE_SERVICE_ROLE_KEY"),
+    );
     if (!url || !key) {
       this.logger.warn(
         "SUPABASE_SERVICE_ROLE_KEY not set; service-only paths disabled",
@@ -39,6 +42,9 @@ export class SupabaseServiceClient implements OnModuleInit {
         autoRefreshToken: false,
       },
     });
+    this.logger.log(
+      `service_role client ready jwt_shape=${key.startsWith("eyJ")}`,
+    );
   }
 
   /** Returns null when service role is not configured. */
