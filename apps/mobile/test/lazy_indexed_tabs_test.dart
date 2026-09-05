@@ -67,4 +67,36 @@ void main() {
     await tester.pump();
     expect(builds['tab1'], 1);
   });
+
+  testWidgets('visited tab receives updated child props', (tester) async {
+    var index = 1;
+    var focus = 'none';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            return Scaffold(
+              body: LazyIndexedTabs(
+                index: index,
+                itemCount: 3,
+                itemBuilder: (_, i) => Text(
+                  i == 1 ? 'map-$focus' : 'tab$i',
+                ),
+              ),
+              bottomNavigationBar: TextButton(
+                onPressed: () => setState(() => focus = 'pt-1'),
+                child: const Text('focus'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(find.text('map-none'), findsOneWidget);
+    await tester.tap(find.text('focus'));
+    await tester.pump();
+    expect(find.text('map-pt-1'), findsOneWidget);
+  });
 }

@@ -31,7 +31,7 @@ class KakaoDeliveryMap extends StatefulWidget {
 
 class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     implements DeliveryMapController {
-  static const _mapKey = ValueKey('delivery-spike-kakao-map');
+  late final Key _mapKey = ValueKey('delivery-kakao-map-$hashCode');
 
   StreamSubscription<LabelClickEvent>? _labelSub;
   StreamSubscription<CameraMoveEndEvent>? _cameraSub;

@@ -518,6 +518,73 @@ void main() {
     expect(focused?.longitude, 126.7);
   });
 
+  testWidgets('point without coords still opens map via callback', (tester) async {
+    WorksetPoint? focused;
+    final workset = TodayWorkset.fromJson({
+      'serviceDate': '2026-09-04',
+      'summary': {
+        'totalPoints': 1,
+        'completedPoints': 0,
+        'pendingPoints': 1,
+        'totalShipments': 1,
+        'byCompany': [
+          {'companyId': 'co-a', 'totalPoints': 1, 'completedPoints': 0},
+        ],
+        'bySource': [
+          {'sourceId': 'src-a', 'totalPoints': 1, 'completedPoints': 0},
+        ],
+      },
+      'companies': [
+        {'id': 'co-a', 'displayName': 'Alpha'},
+      ],
+      'sources': [
+        {
+          'id': 'src-a',
+          'companyId': 'co-a',
+          'ownerDriverId': 'driver-uuid-should-not-render',
+          'sourceType': 'company_api',
+          'sourceKey': 'a',
+          'displayName': 'Alpha Source',
+          'externalSystem': null,
+          'isActive': true,
+        },
+      ],
+      'jobs': const [],
+      'points': [
+        {
+          'pointId': 'pt-pending-coords',
+          'jobId': 'job-a',
+          'companyId': 'co-a',
+          'sourceId': 'src-a',
+          'status': 'pending',
+          'latitude': null,
+          'longitude': null,
+          'quantity': 1,
+          'displayLabel': '좌표 대기',
+          'pinAccuracy': 'address',
+          'piiMasked': false,
+          'hasAccessInfo': false,
+          'shipmentCount': 1,
+          'contactAvailable': false,
+        },
+      ],
+      'shipments': const [],
+    });
+    await _pump(
+      tester,
+      _view(
+        loadState: HomeDashboardLoadState.loaded,
+        workset: workset,
+        onViewPointOnMap: (point) => focused = point,
+      ),
+    );
+    await tester.tap(
+      find.byKey(DeliveryListKeys.pointMapAction('pt-pending-coords')),
+    );
+    expect(focused?.pointId, 'pt-pending-coords');
+    expect(focused?.hasCoordinates, isFalse);
+  });
+
   testWidgets('error and stale reuse Home/Map copy', (tester) async {
     var retried = false;
     await _pump(

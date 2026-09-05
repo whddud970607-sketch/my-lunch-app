@@ -363,7 +363,7 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
     final initialZoom = widget.pins.length > 1 ? 11.0 : 17.0;
 
     return NaverMap(
-      key: const ValueKey('delivery-spike-naver-map'),
+      key: ValueKey('delivery-naver-map-$hashCode'),
       options: NaverMapViewOptions(
         initialCameraPosition: NCameraPosition(target: target, zoom: initialZoom),
         locale: const Locale('ko'),

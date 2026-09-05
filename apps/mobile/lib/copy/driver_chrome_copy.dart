@@ -38,6 +38,7 @@ abstract final class DriverChromeCopy {
   static const manualPinAdjust = '지도에서 위치 확인/조정';
   static const manualPinConfirm = '이 위치로 설정';
   static const manualPinHint = '단지나 동이 다르면 지도를 옮겨 핀을 맞춰 주세요.';
+  static const manualPinPending = '위치 확인 중 · 좌표가 없어 핀을 표시하지 않습니다';
   static const manualInvoiceEvidenceTitle = '송장 증빙 사진';
   static const manualInvoiceEvidenceHint =
       '바코드가 인식되지 않을 경우 실제 송장을 촬영해 증빙으로 남길 수 있습니다.';

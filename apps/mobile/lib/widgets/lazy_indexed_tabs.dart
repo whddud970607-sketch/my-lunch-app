@@ -21,20 +21,23 @@ class LazyIndexedTabs extends StatefulWidget {
 }
 
 class _LazyIndexedTabsState extends State<LazyIndexedTabs> {
-  final Map<int, Widget> _built = {};
+  final Set<int> _visited = {};
 
   @override
   Widget build(BuildContext context) {
     final index = widget.index.clamp(0, widget.itemCount - 1);
-    _built.putIfAbsent(index, () => widget.itemBuilder(context, index));
+    _visited.add(index);
 
     return IndexedStack(
       index: index,
       sizing: StackFit.expand,
       children: List<Widget>.generate(widget.itemCount, (i) {
+        if (!_visited.contains(i)) {
+          return const SizedBox.shrink();
+        }
         return KeyedSubtree(
           key: PageStorageKey<String>('lazy-tab-$i'),
-          child: _built[i] ?? const SizedBox.shrink(),
+          child: widget.itemBuilder(context, i),
         );
       }),
     );

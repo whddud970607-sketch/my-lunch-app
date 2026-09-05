@@ -1,6 +1,7 @@
 import {
   pickManualCoordinatePriority,
   sanitizeManualCoordinates,
+  shouldOverwriteExistingManualLocation,
   toLocationEwkt,
 } from "./manual-register-coordinates";
 
@@ -39,6 +40,21 @@ describe("sanitizeManualCoordinates", () => {
     const picked = pickManualCoordinatePriority({
       adjusted: null,
       apartmentDong: { latitude: 37.2, longitude: 126.2 },
+      baseAddress: { latitude: 37.3, longitude: 126.3 },
+    });
+    expect(picked?.source).toBe("apartment_dong");
+  });
+
+  it("overwrites stored location only for a driver-adjusted pin", () => {
+    expect(shouldOverwriteExistingManualLocation(true)).toBe(true);
+    expect(shouldOverwriteExistingManualLocation(false)).toBe(false);
+    expect(shouldOverwriteExistingManualLocation(undefined)).toBe(false);
+  });
+
+  it("ignores ho: dong wins over base and adjust still wins", () => {
+    const picked = pickManualCoordinatePriority({
+      adjusted: null,
+      apartmentDong: { latitude: 37.201, longitude: 126.201 },
       baseAddress: { latitude: 37.3, longitude: 126.3 },
     });
     expect(picked?.source).toBe("apartment_dong");

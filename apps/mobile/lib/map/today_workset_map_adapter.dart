@@ -19,7 +19,7 @@ class TodayWorksetMapAdapter {
 
     final out = <MapSpikePoint>[];
     for (final p in workset.points) {
-      if (!p.hasCoordinates) continue;
+      if (!isRenderableWorksetPoint(p)) continue;
       final source = workset.sourceById(p.sourceId);
       final company = workset.companyById(p.companyId);
       final shipments = (shipmentsByPoint[p.pointId] ?? const <WorksetShipment>[])
@@ -57,6 +57,31 @@ class TodayWorksetMapAdapter {
       );
     }
     return out;
+  }
+
+  /// One bad/missing coordinate must not block the map host.
+  static bool isRenderableWorksetPoint(WorksetPoint p) {
+    return p.pointId.isNotEmpty && p.hasCoordinates && isFiniteLatLng(p.latitude, p.longitude);
+  }
+
+  static bool isRenderableMapPoint(MapSpikePoint point) {
+    return point.pointId.isNotEmpty &&
+        isFiniteLatLng(point.latitude, point.longitude);
+  }
+
+  static List<MapSpikePoint> retainRenderableMapPoints(
+    Iterable<MapSpikePoint> points,
+  ) {
+    return points.where(isRenderableMapPoint).toList(growable: false);
+  }
+
+  static bool isFiniteLatLng(double? latitude, double? longitude) {
+    if (latitude == null || longitude == null) return false;
+    if (!latitude.isFinite || !longitude.isFinite) return false;
+    if (latitude == 0 && longitude == 0) return false;
+    if (latitude < -90 || latitude > 90) return false;
+    if (longitude < -180 || longitude > 180) return false;
+    return true;
   }
 
   static List<MapSpikePoint> applyFilter(

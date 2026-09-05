@@ -356,7 +356,13 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       }
       final pendingFocus = _pendingFocusPointId ?? widget.focusPointId;
       if (pendingFocus != null && pendingFocus.isNotEmpty) {
-        _applyFocusPoint(pendingFocus);
+        if (_pointsById.containsKey(pendingFocus)) {
+          _applyFocusPoint(pendingFocus);
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(DriverChromeCopy.manualPinPending)),
+          );
+        }
       }
       await _locationCoordinator.loadVehicleType();
       final trackingOk = await _locationCoordinator.startTracking();
@@ -411,19 +417,13 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     }
 
     // Production Today path: no namdong10 soft-enrich dependency.
-    final points = TodayWorksetMapAdapter.toMapPoints(
-      workset,
-      driverId: driverId,
+    // Skip invalid pins; never fail the whole map host for one point.
+    final points = TodayWorksetMapAdapter.retainRenderableMapPoints(
+      TodayWorksetMapAdapter.toMapPoints(
+        workset,
+        driverId: driverId,
+      ),
     );
-    for (final point in points) {
-      final ok = point.pinAccuracy.isNotEmpty &&
-          point.latitude != 0 &&
-          point.longitude != 0 &&
-          point.pointId.isNotEmpty;
-      if (!ok) {
-        throw ApiException(message: 'today workset 핀 필드 검증 실패');
-      }
-    }
     _detailHydratedPointIds.clear();
     return (points: points, apiMs: apiMs, workset: workset);
   }
@@ -795,35 +795,14 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   Widget _buildBody() {
     final stale = _error != null && _pointsById.isNotEmpty;
     final overlay = _overlay(stale: stale);
-
-    if (_loading && _pointsById.isEmpty) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          overlay,
-          const MapLoadingPanel(),
-        ],
-      );
-    }
-    if (_error != null && _pointsById.isEmpty) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          overlay,
-          MapErrorPanel(
-            message: _error!,
-            onRetry: () => _load(isRefresh: false),
-          ),
-        ],
-      );
-    }
-
     final pins = _pinsByMarkerId.values.toList(growable: false);
     final initial = _cameraTarget() ??
         const DeliveryLatLng(
           latitude: 37.5665,
           longitude: 126.9780,
         );
+    final showLoading = _loading && _pointsById.isEmpty;
+    final showError = _error != null && _pointsById.isEmpty;
 
     return Stack(
       fit: StackFit.expand,
@@ -837,6 +816,12 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           onReady: _onMapReady,
         ),
         overlay,
+        if (showLoading) const MapLoadingPanel(),
+        if (showError)
+          MapErrorPanel(
+            message: _error!,
+            onRetry: () => _load(isRefresh: false),
+          ),
         ValueListenableBuilder<bool>(
           valueListenable: _pinAdjustMode,
           builder: (context, adjusting, _) {

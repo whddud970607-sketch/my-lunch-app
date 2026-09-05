@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { shouldOverwriteExistingManualLocation } from "./manual-register-coordinates";
 
 export type DeliveryJobRow = {
   id: string;
@@ -151,11 +152,15 @@ export class DeliveriesRepository {
       patch.driver_adjusted_location = ewkt;
       patch.pin_accuracy = "driver_verified";
     }
-    const { error } = await admin
+    let query = admin
       .from("delivery_points")
       .update(patch)
-      .eq("id", args.pointId)
-      .is("location", null);
+      .eq("id", args.pointId);
+    if (!shouldOverwriteExistingManualLocation(args.driverAdjusted)) {
+      // Do not clobber worker/driver pins with a later representative geocode.
+      query = query.is("location", null);
+    }
+    const { error } = await query;
 
     if (error) {
       this.logger.warn(

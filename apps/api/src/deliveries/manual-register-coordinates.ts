@@ -55,3 +55,10 @@ export function pickManualCoordinatePriority(args: {
   }
   return null;
 }
+
+/** Driver pin may replace a representative location. Other sources fill only. */
+export function shouldOverwriteExistingManualLocation(
+  driverAdjusted: boolean | undefined,
+): boolean {
+  return driverAdjusted === true;
+}
