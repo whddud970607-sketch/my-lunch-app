@@ -23,6 +23,21 @@ class ManualAddressRepository {
     ];
   }
 
+  Future<ManualCoordinateResolveResult> resolveCoordinates({
+    required ManualAddressCandidate candidate,
+    String? dong,
+  }) {
+    return _api
+        .postJson('/delivery/manual/resolve-coordinates', {
+          'buildingName': candidate.buildingName,
+          'roadAddress': candidate.roadAddress,
+          'dong': (dong ?? '').trim(),
+          'latitude': candidate.latitude,
+          'longitude': candidate.longitude,
+        })
+        .then(ManualCoordinateResolveResult.fromJson);
+  }
+
   Future<ManualRegisterResult> register({
     required String commitIdempotencyKey,
     required ManualAddressCandidate candidate,
@@ -64,7 +79,10 @@ class ManualAddressRepository {
           'recipientPhone': ?phone,
           'quantity': quantity,
           ...coords,
-          if (pin?.source == ManualPinSource.manualAdjust) 'pinAdjusted': true,
+          if (pin?.source == ManualPinSource.manualAdjust) ...{
+            'pinAdjusted': true,
+            'pinConfirmed': true,
+          },
           'registrationMethod': 'manual',
           'manualReason': manualReasonApiValue(reason),
         })

@@ -220,6 +220,57 @@ class _ManualAddressRegisterScreenState
       });
       return;
     }
+
+    final dong = _dongController.text.trim();
+    if (dong.isNotEmpty &&
+        _pin?.source != ManualPinSource.manualAdjust) {
+      try {
+        final resolved = await widget.repository.resolveCoordinates(
+          candidate: selected,
+          dong: dong,
+        );
+        if (!mounted) return;
+        if (resolved.exactDongFound &&
+            resolved.latitude != null &&
+            resolved.longitude != null) {
+          setState(() {
+            _pin = ManualPinSelection(
+              latitude: resolved.latitude!,
+              longitude: resolved.longitude!,
+              source: ManualPinSource.apartmentDong,
+            );
+            _submitError = null;
+          });
+        } else if (resolved.requiresPinConfirmation) {
+          setState(() {
+            _submitError = DriverChromeCopy.manualExactDongMiss;
+          });
+          await _openPinAdjust();
+          if (!mounted) return;
+          if (_pin?.source != ManualPinSource.manualAdjust) {
+            setState(() {
+              _submitError = DriverChromeCopy.manualPinConfirmRequired;
+            });
+            return;
+          }
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _offline = isOfflineManualFailure(e);
+          _submitError = DriverChromeCopy.manualExactDongMiss;
+        });
+        await _openPinAdjust();
+        if (!mounted) return;
+        if (_pin?.source != ManualPinSource.manualAdjust) {
+          setState(() {
+            _submitError = DriverChromeCopy.manualPinConfirmRequired;
+          });
+          return;
+        }
+      }
+    }
+
     setState(() {
       _submitLock = true;
       _submitting = true;

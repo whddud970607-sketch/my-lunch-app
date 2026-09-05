@@ -19,9 +19,17 @@ import {
 } from "./delivery-manual-identifier";
 import { AddressResolutionService } from "../address/address-resolution.service";
 import {
+  assertManualDongRegisterAllowed,
+  isUserPinConfirmedFlag,
   pickManualCoordinatePriority,
   sanitizeManualCoordinates,
 } from "./manual-register-coordinates";
+import {
+  isExactDongCandidateVerified,
+  isLongTermPersistableExactCandidate,
+  isTmapRetentionRestrictedExact,
+} from "../address/dong-coordinate-candidate";
+import { normalizeCanonicalDong } from "../address/apartment-dong-match";
 import { parseServiceDateParam } from "./today-workset.service";
 import {
   parseManualReason,
@@ -42,6 +50,8 @@ export type ManualRegisterRequest = {
   recipientPhone?: string | null;
   /** True when lat/lng came from driver pin adjust. */
   pinAdjusted?: boolean;
+  /** Explicit "이 위치가 맞아요 / 이 위치로 설정" — map open alone is false. */
+  pinConfirmed?: boolean;
   /** Base suggest or driver-adjusted coords. Never a ho-level guess. */
   latitude?: number | string | null;
   longitude?: number | string | null;
@@ -60,6 +70,11 @@ export type ManualRegisterResponse = {
   registrationMethod: "manual";
   manualReason: "barcode_scan_failed" | "manual_entry";
   evidenceStatus: "none";
+  /** Exact dong auto-resolution verified (complex + dong + coords). */
+  exactDongResolved?: boolean;
+  /** Base-only / miss — driver must confirm pin for accuracy. */
+  requiresPinConfirmation?: boolean;
+  coordinateSource?: string | null;
 };
 
 const MAX_QUANTITY = 9999;
@@ -68,6 +83,19 @@ function emptyToNull(value: string | null | undefined): string | null {
   if (value == null) return null;
   const t = value.replace(/\s+/g, " ").trim();
   return t === "" ? null : t;
+}
+
+function toLegacyCoordinateSourceLabel(
+  source: "manual_adjust" | "apartment_dong" | "base_address",
+): string {
+  switch (source) {
+    case "manual_adjust":
+      return "user_adjusted";
+    case "apartment_dong":
+      return "provider_dong_exact";
+    case "base_address":
+      return "provider_base_address";
+  }
 }
 
 export function composeManualDongHoDetail(args: {
@@ -179,26 +207,95 @@ export class DeliveryManualRegisterService {
       args.body.latitude,
       args.body.longitude,
     );
-    const adjusted = args.body.pinAdjusted === true ? payloadCoords : null;
-    const baseCoords = args.body.pinAdjusted === true ? null : payloadCoords;
+    const userPinConfirmed = isUserPinConfirmedFlag(args.body);
+    const adjusted = userPinConfirmed ? payloadCoords : null;
+    const baseCoords = userPinConfirmed ? null : payloadCoords;
     let apartmentDong: ReturnType<typeof sanitizeManualCoordinates> = null;
-    if (!adjusted && baseCoords && buildingName && emptyToNull(args.body.dong)) {
-      const dongHit = await this.address.lookupApartmentDongCoords({
+    let exactDongVerified = false;
+    let requiresPinConfirmation = false;
+    let coordinateSource: string | null = null;
+    let geocodeProvider: string | null = null;
+    const requestedDongRaw = emptyToNull(args.body.dong);
+    const requestedDong = normalizeCanonicalDong(requestedDongRaw);
+
+    if (userPinConfirmed && adjusted) {
+      exactDongVerified = false; // user confirmation path — not provider exact
+      requiresPinConfirmation = false;
+      coordinateSource =
+        args.body.pinAdjusted === true ? "user_adjusted" : "user_confirmed";
+      geocodeProvider = "user";
+    } else if (baseCoords && buildingName && requestedDong) {
+      const resolved = await this.address.resolveManualDongCoordinates({
         buildingName,
-        dong: emptyToNull(args.body.dong),
-        latitude: baseCoords.latitude,
-        longitude: baseCoords.longitude,
+        dong: requestedDong,
+        roadAddress: emptyToNull(args.body.roadAddress),
+        baseLatitude: baseCoords.latitude,
+        baseLongitude: baseCoords.longitude,
       });
-      apartmentDong = dongHit
-        ? sanitizeManualCoordinates(dongHit.latitude, dongHit.longitude)
-        : null;
+      requiresPinConfirmation = resolved.requiresPinConfirmation;
+      if (
+        resolved.selected &&
+        isLongTermPersistableExactCandidate(resolved.selected) &&
+        isExactDongCandidateVerified(resolved.selected, requestedDong)
+      ) {
+        exactDongVerified = true;
+        apartmentDong = sanitizeManualCoordinates(
+          resolved.selected.latitude,
+          resolved.selected.longitude,
+        );
+        coordinateSource = resolved.selected.sourceType;
+        geocodeProvider = resolved.selected.provider;
+        requiresPinConfirmation = false;
+      } else if (
+        resolved.selected &&
+        isTmapRetentionRestrictedExact(resolved.selected) &&
+        isExactDongCandidateVerified(resolved.selected, requestedDong)
+      ) {
+        // TMAP Open API retention: corroboration/preview only — never auto-final.
+        exactDongVerified = false;
+        apartmentDong = null;
+        coordinateSource = null;
+        geocodeProvider = null;
+        requiresPinConfirmation = true;
+      } else if (resolved.selected?.matchType === "base_address") {
+        coordinateSource = resolved.selected.sourceType;
+        geocodeProvider = resolved.selected.provider;
+        exactDongVerified = false;
+        requiresPinConfirmation = true;
+      } else {
+        exactDongVerified = false;
+        requiresPinConfirmation = Boolean(requestedDong);
+      }
+    } else if (requestedDong) {
+      exactDongVerified = false;
+      requiresPinConfirmation = true;
     }
+
+    const gate = assertManualDongRegisterAllowed({
+      requestedDong: requestedDongRaw,
+      exactDongVerified,
+      userPinConfirmed,
+    });
+    if (!gate.allowed) {
+      throw new BadRequestException(gate.code);
+    }
+
     const picked = pickManualCoordinatePriority({
       adjusted,
       apartmentDong,
-      baseAddress: baseCoords,
+      // Unverified base must never become the registered delivery pin when dong exists.
+      baseAddress: requestedDong ? null : baseCoords,
     });
-    const coords = picked?.coords ?? null;
+    const coords =
+      picked?.coords ??
+      (exactDongVerified && apartmentDong ? apartmentDong : null) ??
+      (userPinConfirmed ? payloadCoords : null);
+    if (picked && !coordinateSource) {
+      coordinateSource = toLegacyCoordinateSourceLabel(picked.source);
+    }
+    if (userPinConfirmed) {
+      requiresPinConfirmation = false;
+    }
 
     const draft: NormalizedDeliveryDraft = {
       rowIndex: 0,
@@ -220,9 +317,17 @@ export class DeliveryManualRegisterService {
       barcodeRaw: null,
       latitude: coords?.latitude ?? null,
       longitude: coords?.longitude ?? null,
-      geocodeConfidence: coords ? 1 : null,
-      geocodeProvider: coords ? "kakao" : null,
-      geocodeStatus: coords ? "resolved" : "pending",
+      geocodeConfidence: coords
+        ? userPinConfirmed || exactDongVerified
+          ? 1
+          : 0.4
+        : null,
+      geocodeProvider: coords ? geocodeProvider ?? "kakao" : null,
+      geocodeStatus: coords
+        ? userPinConfirmed || exactDongVerified
+          ? "resolved"
+          : "pending"
+        : "pending",
       issues: [],
     };
 
@@ -265,7 +370,7 @@ export class DeliveryManualRegisterService {
               pointId,
               latitude: coords.latitude,
               longitude: coords.longitude,
-              driverAdjusted: picked?.source === "manual_adjust",
+              driverAdjusted: userPinConfirmed,
             },
           );
           if (!persisted) {
@@ -304,6 +409,9 @@ export class DeliveryManualRegisterService {
       registrationMethod,
       manualReason,
       evidenceStatus: "none",
+      exactDongResolved: exactDongVerified,
+      requiresPinConfirmation,
+      coordinateSource,
     };
   }
 

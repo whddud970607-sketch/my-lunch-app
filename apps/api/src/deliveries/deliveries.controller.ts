@@ -45,6 +45,7 @@ import {
   mapShipmentStatusLabel,
   parsePointLocation,
 } from "./location.util";
+import { AddressResolutionService } from "../address/address-resolution.service";
 
 /**
  * Delivery read/update. Ordinary point/PII/shipment reads use user JWT + RLS.
@@ -64,6 +65,7 @@ export class DeliveriesController {
     private readonly manualSuggest: DeliveryManualAddressSuggestService,
     private readonly manualRegister: DeliveryManualRegisterService,
     private readonly invoiceEvidence: DeliveryManualInvoiceEvidenceService,
+    private readonly address: AddressResolutionService,
   ) {}
 
   /**
@@ -129,6 +131,48 @@ export class DeliveriesController {
   ) {
     this.scope.forUser(user).requireDriverId();
     return this.manualSuggest.suggest(q ?? "");
+  }
+
+  /**
+   * Multi-source apartment-dong coordinate resolve (map UI provider-agnostic).
+   * Exact dong only when validated; base never promoted to exact.
+   */
+  @Post("manual/resolve-coordinates")
+  @Roles("driver")
+  async resolveManualCoordinates(
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      buildingName?: string | null;
+      dong?: string | null;
+      roadAddress?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    },
+  ) {
+    this.scope.forUser(user).requireDriverId();
+    const result = await this.address.resolveManualDongCoordinates({
+      buildingName: body.buildingName ?? null,
+      dong: body.dong ?? null,
+      roadAddress: body.roadAddress ?? null,
+      baseLatitude: body.latitude ?? null,
+      baseLongitude: body.longitude ?? null,
+    });
+    return {
+      exactDongFound: result.exactDongFound,
+      requiresPinConfirmation: result.requiresPinConfirmation,
+      requestedDong: result.requestedDong,
+      selected: result.selected
+        ? {
+            latitude: result.selected.latitude,
+            longitude: result.selected.longitude,
+            sourceType: result.selected.sourceType,
+            provider: result.selected.provider,
+            matchType: result.selected.matchType,
+            confidence: result.selected.confidence,
+          }
+        : null,
+    };
   }
 
   /**

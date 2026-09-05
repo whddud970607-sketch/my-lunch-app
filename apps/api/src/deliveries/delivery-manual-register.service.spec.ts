@@ -119,7 +119,25 @@ describe("DeliveryManualRegisterService", () => {
     const applyManualSearchLocation = jest.fn().mockResolvedValue(true);
     const applyManualRecipientContact = jest.fn().mockResolvedValue(true);
     const upsertManualRegistration = jest.fn().mockResolvedValue(true);
-    const lookupApartmentDongCoords = jest.fn().mockResolvedValue(null);
+    const resolveManualDongCoordinates = jest.fn().mockResolvedValue({
+      selected: {
+        provider: "kakao",
+        sourceType: "kakao_exact_dong",
+        latitude: 37.428292,
+        longitude: 126.748615,
+        matchedComplex: true,
+        matchedDong: "504동",
+        requestedDong: "504동",
+        matchType: "exact_dong",
+        confidence: 0.82,
+        evidence: ["test_exact"],
+        verification: "n/a",
+      },
+      exactDongFound: true,
+      requiresPinConfirmation: false,
+      candidates: [],
+      requestedDong: "504동",
+    });
     const admin = {
       from: jest.fn((table: string) => {
         if (table === "delivery_sources") {
@@ -141,7 +159,7 @@ describe("DeliveryManualRegisterService", () => {
         upsertManualRegistration,
       } as unknown as DeliveriesRepository,
       {
-        lookupApartmentDongCoords,
+        resolveManualDongCoordinates,
       } as unknown as AddressResolutionService,
     );
     return {
@@ -152,7 +170,7 @@ describe("DeliveryManualRegisterService", () => {
       applyManualSearchLocation,
       applyManualRecipientContact,
       upsertManualRegistration,
-      lookupApartmentDongCoords,
+      resolveManualDongCoordinates,
     };
   }
 
@@ -164,6 +182,8 @@ describe("DeliveryManualRegisterService", () => {
     dong: "504",
     unit: "2003",
     quantity: 1,
+    latitude: 37.42,
+    longitude: 126.74,
   };
 
   it("ensures source then commits one manual draft", async () => {
@@ -196,7 +216,7 @@ describe("DeliveryManualRegisterService", () => {
   });
 
   it("prefers pin-adjusted coords and skips dong lookup", async () => {
-    const { svc, applyManualSearchLocation, lookupApartmentDongCoords } =
+    const { svc, applyManualSearchLocation, resolveManualDongCoordinates } =
       setup();
     await svc.register({} as never, {
       driverId: DRIVER_ID,
@@ -208,7 +228,7 @@ describe("DeliveryManualRegisterService", () => {
         pinAdjusted: true,
       },
     });
-    expect(lookupApartmentDongCoords).not.toHaveBeenCalled();
+    expect(resolveManualDongCoordinates).not.toHaveBeenCalled();
     expect(applyManualSearchLocation).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -220,11 +240,25 @@ describe("DeliveryManualRegisterService", () => {
   });
 
   it("uses apartment dong coords when provider returns them", async () => {
-    const { svc, applyManualSearchLocation, lookupApartmentDongCoords } =
+    const { svc, applyManualSearchLocation, resolveManualDongCoordinates } =
       setup();
-    lookupApartmentDongCoords.mockResolvedValue({
-      latitude: 37.22,
-      longitude: 126.22,
+    resolveManualDongCoordinates.mockResolvedValue({
+      selected: {
+        provider: "kakao",
+        sourceType: "kakao_exact_dong",
+        latitude: 37.22,
+        longitude: 126.22,
+        matchedComplex: true,
+        matchedDong: "504동",
+        requestedDong: "504동",
+        matchType: "exact_dong",
+        confidence: 0.82,
+        evidence: [],
+      },
+      exactDongFound: true,
+      requiresPinConfirmation: false,
+      candidates: [],
+      requestedDong: "504동",
     });
     await svc.register({} as never, {
       driverId: DRIVER_ID,
@@ -235,7 +269,7 @@ describe("DeliveryManualRegisterService", () => {
         longitude: 126.74,
       },
     });
-    expect(lookupApartmentDongCoords).toHaveBeenCalled();
+    expect(resolveManualDongCoordinates).toHaveBeenCalled();
     expect(applyManualSearchLocation).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -365,28 +399,164 @@ describe("DeliveryManualRegisterService", () => {
       },
     });
     const draft = commit.mock.calls[0][2].drafts[0];
-    expect(draft.latitude).toBe(37.42);
-    expect(draft.longitude).toBe(126.74);
+    // Exact dong verified → store verified dong coords, not raw base suggest.
+    expect(draft.latitude).toBe(37.428292);
+    expect(draft.longitude).toBe(126.748615);
     expect(draft.geocodeProvider).toBe("kakao");
     expect(draft.geocodeStatus).toBe("resolved");
     expect(applyManualSearchLocation).toHaveBeenCalledWith(
       expect.anything(),
       {
         pointId: POINT_ID,
-        latitude: 37.42,
-        longitude: 126.74,
+        latitude: 37.428292,
+        longitude: 126.748615,
         driverAdjusted: false,
       },
     );
   });
 
+  it("CASE fail-closed: base-only with dong rejects without pin confirmation", async () => {
+    const { svc, commit, resolveManualDongCoordinates } = setup();
+    resolveManualDongCoordinates.mockResolvedValue({
+      selected: {
+        provider: "kakao",
+        sourceType: "kakao_base_address",
+        latitude: 37.42968,
+        longitude: 126.74813,
+        matchedComplex: false,
+        matchedDong: null,
+        requestedDong: "503동",
+        matchType: "base_address",
+        confidence: 0.35,
+        evidence: ["NOT_EXACT_DONG"],
+      },
+      exactDongFound: false,
+      requiresPinConfirmation: true,
+      candidates: [],
+      requestedDong: "503동",
+    });
+    await expect(
+      svc.register({} as never, {
+        driverId: DRIVER_ID,
+        companyIds: [],
+        body: {
+          ...body,
+          dong: "503",
+          latitude: 37.42968,
+          longitude: 126.74813,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: { message: "manual_pin_confirmation_required" },
+    });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("CASE fail-closed: malicious client coords without confirmation rejected", async () => {
+    const { svc, commit, resolveManualDongCoordinates } = setup();
+    resolveManualDongCoordinates.mockResolvedValue({
+      selected: null,
+      exactDongFound: false,
+      requiresPinConfirmation: true,
+      candidates: [],
+      requestedDong: "503동",
+    });
+    await expect(
+      svc.register({} as never, {
+        driverId: DRIVER_ID,
+        companyIds: [],
+        body: {
+          ...body,
+          dong: "503",
+          latitude: 37.42968,
+          longitude: 126.74813,
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("CASE fail-closed: user pinConfirmed allows base position registration", async () => {
+    const { svc, commit, applyManualSearchLocation, resolveManualDongCoordinates } =
+      setup();
+    resolveManualDongCoordinates.mockResolvedValue({
+      selected: null,
+      exactDongFound: false,
+      requiresPinConfirmation: true,
+      candidates: [],
+      requestedDong: "503동",
+    });
+    const out = await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        dong: "503",
+        latitude: 37.42968,
+        longitude: 126.74813,
+        pinConfirmed: true,
+      },
+    });
+    expect(out.ok).toBe(true);
+    expect(resolveManualDongCoordinates).not.toHaveBeenCalled();
+    expect(commit.mock.calls[0][2].drafts[0].latitude).toBe(37.42968);
+    expect(applyManualSearchLocation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        latitude: 37.42968,
+        longitude: 126.74813,
+        driverAdjusted: true,
+      }),
+    );
+  });
+
+  it("CASE fail-closed: pinAdjusted allows registration and marks immutable", async () => {
+    const { svc, applyManualSearchLocation, resolveManualDongCoordinates } =
+      setup();
+    await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        dong: "503",
+        latitude: 37.11,
+        longitude: 126.11,
+        pinAdjusted: true,
+      },
+    });
+    expect(resolveManualDongCoordinates).not.toHaveBeenCalled();
+    expect(applyManualSearchLocation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ driverAdjusted: true }),
+    );
+  });
+
   it("leaves invalid coordinates pending and does not persist", async () => {
+    const { svc, commit, applyManualSearchLocation } = setup();
+    // Dong present + invalid coords + no pin confirm → fail-closed reject.
+    await expect(
+      svc.register({} as never, {
+        driverId: DRIVER_ID,
+        companyIds: [],
+        body: {
+          ...body,
+          latitude: 91,
+          longitude: 126.74,
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(commit).not.toHaveBeenCalled();
+    expect(applyManualSearchLocation).not.toHaveBeenCalled();
+  });
+
+  it("without dong, invalid coordinates stay pending and do not persist", async () => {
     const { svc, commit, applyManualSearchLocation } = setup();
     await svc.register({} as never, {
       driverId: DRIVER_ID,
       companyIds: [],
       body: {
         ...body,
+        dong: "",
         latitude: 91,
         longitude: 126.74,
       },
@@ -407,5 +577,84 @@ describe("DeliveryManualRegisterService", () => {
       "driver-manual",
       { ownerDriverId: other },
     );
+  });
+
+  it("C retention: TMAP-only verified exact blocks auto register", async () => {
+    const { svc, commit, resolveManualDongCoordinates } = setup();
+    resolveManualDongCoordinates.mockResolvedValue({
+      selected: {
+        provider: "tmap",
+        sourceType: "tmap_exact_dong",
+        latitude: 37.42832726,
+        longitude: 126.74857363,
+        matchedComplex: true,
+        matchedDong: "503동",
+        requestedDong: "503동",
+        matchType: "exact_dong",
+        confidence: 0.88,
+        evidence: ["tmap_apartment_dong_reverse_verified"],
+        verification: "verified",
+      },
+      exactDongFound: false,
+      requiresPinConfirmation: true,
+      candidates: [],
+      requestedDong: "503동",
+    });
+    await expect(
+      svc.register({} as never, {
+        driverId: DRIVER_ID,
+        companyIds: [],
+        body: {
+          ...body,
+          buildingName: "서창센트럴푸르지오",
+          dong: "503",
+          latitude: 37.42832726,
+          longitude: 126.74857363,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: { message: "manual_pin_confirmation_required" },
+    });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("D retention: TMAP-only + pinConfirmed → user_confirmed, not tmap", async () => {
+    const { svc, commit, resolveManualDongCoordinates } = setup();
+    const out = await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        latitude: 37.42832726,
+        longitude: 126.74857363,
+        pinConfirmed: true,
+      },
+    });
+    expect(out.ok).toBe(true);
+    expect(resolveManualDongCoordinates).not.toHaveBeenCalled();
+    expect(out.coordinateSource).toBe("user_confirmed");
+    expect(out.exactDongResolved).toBe(false);
+    expect(commit.mock.calls[0][2].drafts[0].geocodeProvider).toBe("user");
+  });
+
+  it("E retention: TMAP-only + pinAdjusted → user_adjusted", async () => {
+    const { svc, resolveManualDongCoordinates } = setup();
+    const out = await svc.register({} as never, {
+      driverId: DRIVER_ID,
+      companyIds: [],
+      body: {
+        ...body,
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        latitude: 37.11,
+        longitude: 126.11,
+        pinAdjusted: true,
+      },
+    });
+    expect(out.ok).toBe(true);
+    expect(resolveManualDongCoordinates).not.toHaveBeenCalled();
+    expect(out.coordinateSource).toBe("user_adjusted");
   });
 });

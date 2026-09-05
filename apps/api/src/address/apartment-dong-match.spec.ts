@@ -1,5 +1,6 @@
-import {
+﻿import {
   apartmentIdentityMatches,
+  classifyPlaceSemantic,
   hasExactDongToken,
   normalizeCanonicalDong,
   selectExactApartmentDongHit,
@@ -145,8 +146,117 @@ describe("apartment dong exact matcher", () => {
         buildingName: APT,
         dong: "504동",
         documents: [
-          { place_name: `${APT} 504동`, x: "126.11", y: "37.11" },
-          { place_name: `${APT} 504동 상가`, x: "126.19", y: "37.19" },
+          {
+            place_name: `${APT} 504동`,
+            category_name: "부동산 > 아파트 동",
+            x: "126.11",
+            y: "37.11",
+          },
+          {
+            place_name: `${APT}아파트 504동`,
+            category_name: "부동산 > 아파트 동",
+            x: "126.19",
+            y: "37.19",
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("503 regression: prefers apartment dong and rejects EV charger", () => {
+    const hit = selectExactApartmentDongHit({
+      buildingName: "서창센트럴푸르지오",
+      dong: "503",
+      documents: [
+        {
+          place_name: "서창센트럴푸르지오아파트 503동",
+          category_name: "부동산 > 아파트 동",
+          x: "126.74861487206365",
+          y: "37.42829218537658",
+        },
+        {
+          place_name: "인천남동 서창센트럴푸르지오 503동 전기차충전소",
+          category_name: "교통,수송 > 자동차 > 전기차 충전소",
+          x: "126.74813681079378",
+          y: "37.429685938501756",
+        },
+      ],
+    });
+    expect(hit).toEqual({
+      latitude: 37.42829218537658,
+      longitude: 126.74861487206365,
+    });
+  });
+
+  it("classifies semantic types for facility vs apartment dong", () => {
+    expect(
+      classifyPlaceSemantic({
+        place_name: "서창센트럴푸르지오아파트 503동",
+        category_name: "부동산 > 아파트 동",
+      }),
+    ).toBe("APARTMENT_DONG");
+    expect(
+      classifyPlaceSemantic({
+        place_name: "서창센트럴푸르지오 503동 전기차충전소",
+        category_name: "교통,수송 > 자동차 > 전기차 충전소",
+      }),
+    ).toBe("CHARGING_STATION");
+    expect(
+      classifyPlaceSemantic({
+        place_name: "서창센트럴푸르지오 관리사무소",
+      }),
+    ).toBe("MANAGEMENT_OFFICE");
+  });
+
+  it("rejects 501-only / 1503 / 503호 / other apartment for requested 503", () => {
+    expect(
+      selectExactApartmentDongHit({
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        documents: [
+          {
+            place_name: "서창센트럴푸르지오아파트 501동",
+            category_name: "부동산 > 아파트 동",
+            x: "126.1",
+            y: "37.1",
+          },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      selectExactApartmentDongHit({
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        documents: [
+          {
+            place_name: "서창센트럴푸르지오아파트 1503동",
+            category_name: "부동산 > 아파트 동",
+            x: "126.1",
+            y: "37.1",
+          },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      selectExactApartmentDongHit({
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        documents: [
+          { place_name: "서창센트럴푸르지오 503호", x: "126.1", y: "37.1" },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      selectExactApartmentDongHit({
+        buildingName: "서창센트럴푸르지오",
+        dong: "503",
+        documents: [
+          {
+            place_name: "다른아파트 503동",
+            category_name: "부동산 > 아파트 동",
+            x: "126.1",
+            y: "37.1",
+          },
         ],
       }),
     ).toBeNull();

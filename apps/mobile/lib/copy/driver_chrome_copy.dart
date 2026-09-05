@@ -14,6 +14,8 @@ abstract final class DriverChromeCopy {
   static const companyVolumes = '회사별 물량';
   static const loadListFailed = '배송 목록을 불러오지 못했습니다';
   static const loadMapFailed = '지도 데이터를 불러오지 못했습니다';
+  static const mapPointsLoading = '배송지 불러오는 중...';
+  static const mapPointLocationUnknown = '배송지 위치를 확인할 수 없습니다';
   static const registerByAddress = '주소로 직접 등록';
   static const manualSearchTitle = '주소 검색';
   static const manualSearchHint = '도로명 또는 지번 주소';
@@ -39,6 +41,10 @@ abstract final class DriverChromeCopy {
   static const manualPinConfirm = '이 위치로 설정';
   static const manualPinHint = '단지나 동이 다르면 지도를 옮겨 핀을 맞춰 주세요.';
   static const manualPinPending = '위치 확인 중 · 좌표가 없어 핀을 표시하지 않습니다';
+  static const manualExactDongMiss =
+      '입력한 동의 정확한 위치를 자동으로 확인하지 못했습니다. 지도에서 핀을 확인해 주세요.';
+  static const manualExactDongResolved = '동 위치를 확인했습니다.';
+  static const manualPinConfirmRequired = '등록 전에 핀 위치를 확인해 주세요.';
   static const manualInvoiceEvidenceTitle = '송장 증빙 사진';
   static const manualInvoiceEvidenceHint =
       '바코드가 인식되지 않을 경우 실제 송장을 촬영해 증빙으로 남길 수 있습니다.';

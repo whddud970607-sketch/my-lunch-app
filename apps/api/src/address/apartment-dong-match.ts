@@ -8,6 +8,44 @@ export type KakaoKeywordPlace = {
   id?: string;
 };
 
+export type PlaceSemanticType =
+  | "APARTMENT_DONG"
+  | "FACILITY"
+  | "CHARGING_STATION"
+  | "MANAGEMENT_OFFICE"
+  | "STORE"
+  | "OTHER";
+
+/** Classify POI semantics before exact-dong auto-select. */
+export function classifyPlaceSemantic(
+  doc: Pick<KakaoKeywordPlace, "place_name" | "category_name">,
+): PlaceSemanticType {
+  const cat = doc.category_name ?? "";
+  const name = (doc.place_name ?? "").replace(/\s+/gu, "");
+  if (/전기차|충전소/u.test(name) || cat.includes("충전소")) {
+    return "CHARGING_STATION";
+  }
+  if (/관리사무소/u.test(name) || cat.includes("관리사무소")) {
+    return "MANAGEMENT_OFFICE";
+  }
+  if (/상가|편의점|마트|상점/u.test(name) || cat.includes("쇼핑")) {
+    return "STORE";
+  }
+  if (/주차장|커뮤니티|경비실|시설/u.test(name)) {
+    return "FACILITY";
+  }
+  if (cat.includes("아파트 동")) return "APARTMENT_DONG";
+  if (/\d+동$/u.test(name) && !/전기차|충전소|관리사무소|상가/u.test(name)) {
+    return "APARTMENT_DONG";
+  }
+  return "OTHER";
+}
+
+/** Exact dong auto-select target: APARTMENT_DONG only. */
+export function isKakaoApartmentDongPlace(doc: KakaoKeywordPlace): boolean {
+  return classifyPlaceSemantic(doc) === "APARTMENT_DONG";
+}
+
 /** "504", "504동", " 504 동 " → "504동" */
 export function normalizeCanonicalDong(raw: string | null | undefined): string | null {
   if (raw == null) return null;
@@ -63,7 +101,11 @@ function parseKeywordCoords(
   return { latitude, longitude };
 }
 
-/** Exact apartment + exact dong only. Ambiguous coords → null (use base + pin). */
+/**
+ * Exact apartment + exact dong only.
+ * Facility POIs (EV charger, office) are rejected even if title contains N동.
+ * Ambiguous apartment-dong coords → null (use base + pin confirmation).
+ */
 export function selectExactApartmentDongHit(args: {
   buildingName: string;
   dong: string;
@@ -75,6 +117,7 @@ export function selectExactApartmentDongHit(args: {
 
   const matches: Array<{ latitude: number; longitude: number }> = [];
   for (const doc of args.documents) {
+    if (!isKakaoApartmentDongPlace(doc)) continue;
     // Prefer place_name (동 단위 POI). Address fields alone often lack 동 token.
     const dongHit =
       hasExactDongToken(doc.place_name, canonicalDong) ||

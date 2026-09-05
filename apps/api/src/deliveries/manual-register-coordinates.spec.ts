@@ -1,4 +1,7 @@
 import {
+  assertManualDongRegisterAllowed,
+  isUserPinConfirmedFlag,
+  manualSourceFromDongSourceType,
   pickManualCoordinatePriority,
   sanitizeManualCoordinates,
   shouldOverwriteExistingManualLocation,
@@ -52,10 +55,58 @@ describe("sanitizeManualCoordinates", () => {
     expect(toCoordinateSource("base_address")).toBe("provider_base_address");
   });
 
+  it("F: tmap_exact_dong is not mapped to persistable apartment_dong", () => {
+    expect(manualSourceFromDongSourceType("tmap_exact_dong")).toBeNull();
+    expect(manualSourceFromDongSourceType("kakao_exact_dong")).toBe(
+      "apartment_dong",
+    );
+  });
+
   it("overwrites stored location only for a driver-adjusted pin", () => {
     expect(shouldOverwriteExistingManualLocation(true)).toBe(true);
     expect(shouldOverwriteExistingManualLocation(false)).toBe(false);
     expect(shouldOverwriteExistingManualLocation(undefined)).toBe(false);
+  });
+
+  it("fail-closed gate: dong requires exact OR user confirm", () => {
+    expect(
+      assertManualDongRegisterAllowed({
+        requestedDong: "503동",
+        exactDongVerified: true,
+        userPinConfirmed: false,
+      }),
+    ).toEqual({ allowed: true });
+    expect(
+      assertManualDongRegisterAllowed({
+        requestedDong: "503",
+        exactDongVerified: false,
+        userPinConfirmed: true,
+      }),
+    ).toEqual({ allowed: true });
+    expect(
+      assertManualDongRegisterAllowed({
+        requestedDong: "503동",
+        exactDongVerified: false,
+        userPinConfirmed: false,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "manual_pin_confirmation_required",
+    });
+    expect(
+      assertManualDongRegisterAllowed({
+        requestedDong: null,
+        exactDongVerified: false,
+        userPinConfirmed: false,
+      }),
+    ).toEqual({ allowed: true });
+  });
+
+  it("map open alone is not user confirmation", () => {
+    expect(isUserPinConfirmedFlag({})).toBe(false);
+    expect(isUserPinConfirmedFlag({ pinAdjusted: false })).toBe(false);
+    expect(isUserPinConfirmedFlag({ pinConfirmed: true })).toBe(true);
+    expect(isUserPinConfirmedFlag({ pinAdjusted: true })).toBe(true);
   });
 
   it("ignores ho: dong wins over base and adjust still wins", () => {

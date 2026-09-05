@@ -19,6 +19,8 @@ import {
   emitDiagnostic,
   type ResolutionDiagnosticSink,
 } from "./building/resolution-diagnostic-trace";
+import { ManualAddressCoordinateResolver } from "./manual-address-coordinate-resolver";
+import type { ManualDongResolveInput } from "./dong-coordinate-candidate";
 
 const PRIMARY_CONFIDENCE_STOP = 0.78;
 const PROVIDER_TIMEOUT_MS = 8000;
@@ -40,6 +42,7 @@ export class AddressResolutionService {
   private readonly naver: NaverGeocodeAdapter;
   private readonly publicBuilding: PublicBuildingDataAdapter;
   private readonly geocodeProviders: GeocodeProvider[];
+  private readonly manualDongResolver: ManualAddressCoordinateResolver;
 
   constructor(private readonly config: ConfigService) {
     this.kakao = new KakaoGeocodeAdapter(
@@ -51,6 +54,7 @@ export class AddressResolutionService {
     );
     this.publicBuilding = new PublicBuildingDataAdapter({ config: this.config });
     this.geocodeProviders = [this.kakao, this.naver];
+    this.manualDongResolver = new ManualAddressCoordinateResolver(this.config);
   }
 
   isKakaoConfigured(): boolean {
@@ -64,19 +68,39 @@ export class AddressResolutionService {
     return this.kakao.searchAddressDocuments(query);
   }
 
-  lookupApartmentDongCoords(args: {
+  /**
+   * Multi-source exact dong resolution for manual register.
+   * Map UI provider is unrelated — this returns WGS84 candidates only.
+   */
+  resolveManualDongCoordinates(input: ManualDongResolveInput) {
+    return this.manualDongResolver.resolve(input);
+  }
+
+  /**
+   * @deprecated Prefer resolveManualDongCoordinates. Kakao-only exact hit.
+   */
+  async lookupApartmentDongCoords(args: {
     buildingName: string | null;
     dong: string | null;
     latitude: number;
     longitude: number;
+    roadAddress?: string | null;
   }) {
-    if (!args.buildingName || !args.dong) return Promise.resolve(null);
-    return this.kakao.lookupApartmentDong({
+    const result = await this.manualDongResolver.resolve({
       buildingName: args.buildingName,
       dong: args.dong,
-      latitude: args.latitude,
-      longitude: args.longitude,
+      roadAddress: args.roadAddress,
+      baseLatitude: args.latitude,
+      baseLongitude: args.longitude,
     });
+    if (!result.exactDongFound || !result.selected) return null;
+    return {
+      latitude: result.selected.latitude,
+      longitude: result.selected.longitude,
+      sourceType: result.selected.sourceType,
+      provider: result.selected.provider,
+      requiresPinConfirmation: result.requiresPinConfirmation,
+    };
   }
 
   getOrchestrationPolicy(): ProviderOrchestrationPolicy {

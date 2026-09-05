@@ -40,6 +40,7 @@ export type ManualCoordSource =
 
 export type CoordinateSource =
   | "user_adjusted"
+  | "user_confirmed"
   | "provider_dong_exact"
   | "provider_base_address"
   | "worker"
@@ -56,6 +57,59 @@ export function toCoordinateSource(
     case "base_address":
       return "provider_base_address";
   }
+}
+
+/** Map resolver sourceType → register priority bucket. Never promote base to exact. */
+export function manualSourceFromDongSourceType(
+  sourceType: string | null | undefined,
+): ManualCoordSource | null {
+  switch (sourceType) {
+    case "user_adjusted":
+    case "user_confirmed":
+      return "manual_adjust";
+    case "kakao_exact_dong":
+    case "naver_local_exact_dong":
+    case "official_exact_building_dong":
+      return "apartment_dong";
+    // tmap_exact_dong: Open API retention — not a long-term provider final source
+    case "tmap_exact_dong":
+      return null;
+    case "kakao_base_address":
+    case "naver_base_geocode":
+    case "tmap_base_address":
+    case "official_base_address":
+      return "base_address";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Fail-closed gate: when a dong was requested, only verified exact dong
+ * or explicit user pin confirmation may finalize registration.
+ * Map preview / base representative alone is never enough.
+ */
+export function assertManualDongRegisterAllowed(args: {
+  requestedDong: string | null | undefined;
+  exactDongVerified: boolean;
+  userPinConfirmed: boolean;
+}): { allowed: true } | { allowed: false; code: "manual_pin_confirmation_required" } {
+  const dong =
+    typeof args.requestedDong === "string"
+      ? args.requestedDong.replace(/\s+/g, " ").trim()
+      : "";
+  if (!dong) return { allowed: true };
+  if (args.exactDongVerified === true) return { allowed: true };
+  if (args.userPinConfirmed === true) return { allowed: true };
+  return { allowed: false, code: "manual_pin_confirmation_required" };
+}
+
+/** True only when client asserts explicit pin confirm/adjust (not map open). */
+export function isUserPinConfirmedFlag(body: {
+  pinAdjusted?: boolean;
+  pinConfirmed?: boolean;
+}): boolean {
+  return body.pinAdjusted === true || body.pinConfirmed === true;
 }
 
 /** User pin > dong keyword > base address. Never invent coords. */
@@ -76,7 +130,10 @@ export function pickManualCoordinatePriority(args: {
   return null;
 }
 
-/** Driver pin may replace a representative location. Other sources fill only. */
+/**
+ * Driver-confirmed pin may replace a representative location.
+ * Resolvers/workers must not overwrite driver_verified pins.
+ */
 export function shouldOverwriteExistingManualLocation(
   driverAdjusted: boolean | undefined,
 ): boolean {
