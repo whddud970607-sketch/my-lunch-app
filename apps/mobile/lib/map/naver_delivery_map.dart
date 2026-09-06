@@ -321,16 +321,31 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
     DeliveryLatLng target, {
     double? zoom,
     bool programmatic = false,
+    bool followUpdate = false,
   }) async {
     final controller = _controller;
     if (controller == null) return;
     if (programmatic) _programmaticCameraMove = true;
-    await controller.updateCamera(
-      NCameraUpdate.scrollAndZoomTo(
-        target: NLatLng(target.latitude, target.longitude),
-        zoom: zoom ?? (widget.pins.length > 1 ? 14.0 : 17.0),
-      ),
+    // followUpdate + null zoom → omit zoom so user pinch level is preserved.
+    final double? resolvedZoom;
+    if (zoom != null) {
+      resolvedZoom = zoom;
+    } else if (followUpdate) {
+      resolvedZoom = null;
+    } else {
+      resolvedZoom = widget.pins.length > 1 ? 14.0 : 17.0;
+    }
+    final update = NCameraUpdate.scrollAndZoomTo(
+      target: NLatLng(target.latitude, target.longitude),
+      zoom: resolvedZoom,
     );
+    if (followUpdate) {
+      update.setAnimation(
+        animation: NCameraAnimation.linear,
+        duration: const Duration(milliseconds: 100),
+      );
+    }
+    await controller.updateCamera(update);
   }
 
   @override
@@ -362,6 +377,7 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
     );
     final initialZoom = widget.pins.length > 1 ? 11.0 : 17.0;
 
+    debugPrint('[MAP] naver widget created');
     return NaverMap(
       key: ValueKey('delivery-naver-map-$hashCode'),
       options: NaverMapViewOptions(

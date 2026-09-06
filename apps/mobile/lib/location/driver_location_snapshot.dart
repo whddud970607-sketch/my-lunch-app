@@ -9,6 +9,7 @@ class DriverLocationSnapshot {
     required this.speedMetersPerSecond,
     required this.accuracyMeters,
     required this.timestamp,
+    this.sequence = 0,
   });
 
   final double latitude;
@@ -21,10 +22,14 @@ class DriverLocationSnapshot {
   final double accuracyMeters;
   final DateTime timestamp;
 
+  /// Monotonic emit order from [DriverLocationService] (stale-guard aid).
+  final int sequence;
+
   static const invalidHeading = -1.0;
   static const lowSpeedThresholdMps = 1.0;
-  static const markerMinDistanceMeters = 5.0;
-  static const markerMinHeadingDeltaDegrees = 10.0;
+  /// Low-latency marker updates for vehicle movement (was 5m).
+  static const markerMinDistanceMeters = 1.0;
+  static const markerMinHeadingDeltaDegrees = 5.0;
 
   /// Haversine distance in meters.
   double distanceMetersTo(DriverLocationSnapshot other) {
@@ -52,6 +57,13 @@ class DriverLocationSnapshot {
     if (h1 == null || h2 == null) return false;
     final delta = _headingDeltaDegrees(h1, h2);
     return delta >= markerMinHeadingDeltaDegrees;
+  }
+
+  /// True when [this] is older than [newer] (stale callback protection).
+  bool isStaleRelativeTo(DriverLocationSnapshot newer) {
+    if (timestamp.isBefore(newer.timestamp)) return true;
+    if (timestamp.isAfter(newer.timestamp)) return false;
+    return sequence < newer.sequence;
   }
 
   static double _headingDeltaDegrees(double a, double b) {

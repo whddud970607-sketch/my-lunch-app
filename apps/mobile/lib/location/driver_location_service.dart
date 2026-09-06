@@ -6,7 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'driver_location_filter.dart';
 import 'driver_location_snapshot.dart';
 
-/// Foreground-only GPS source shared by map UI and future TMAP navigation.
+/// Foreground-only GPS source shared by map UI (not Kakao KNSDK nav camera).
 class DriverLocationService {
   DriverLocationService({
     DriverLocationFilter? filter,
@@ -27,8 +27,11 @@ class DriverLocationService {
             ((settings) =>
                 Geolocator.getPositionStream(locationSettings: settings));
 
-  static const distanceFilterMeters = 8;
-  static const androidInterval = Duration(seconds: 3);
+  /// Light OS-side filter — prefer continuous driving updates over sparse fixes.
+  static const distanceFilterMeters = 1;
+
+  /// Android delivery interval (was 3s — multi-second lag for vehicle UI).
+  static const androidInterval = Duration(milliseconds: 1000);
 
   final DriverLocationFilter _filter;
   final Future<bool> Function() _isLocationServiceEnabled;
@@ -42,9 +45,10 @@ class DriverLocationService {
 
   StreamSubscription<Position>? _subscription;
   DriverLocationSnapshot? _lastEmitted;
+  int _emitSequence = 0;
   bool _permissionGranted = false;
 
-  /// Broadcast stream of stabilized location samples (no logging of coordinates).
+  /// Broadcast stream of location samples (no logging of coordinates).
   Stream<DriverLocationSnapshot> get positions => _controller.stream;
 
   DriverLocationSnapshot? get lastSnapshot => _lastEmitted;
@@ -54,14 +58,14 @@ class DriverLocationService {
   bool get hasPermission => _permissionGranted;
 
   LocationSettings get _settings => const LocationSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: LocationAccuracy.bestForNavigation,
         distanceFilter: distanceFilterMeters,
       );
 
   LocationSettings get _settingsWithAndroidInterval {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: LocationAccuracy.bestForNavigation,
         distanceFilter: distanceFilterMeters,
         intervalDuration: androidInterval,
       );
@@ -117,23 +121,38 @@ class DriverLocationService {
   }
 
   void _emitFromPosition(Position position, {bool force = false}) {
+    final timestamp = position.timestamp;
+    // Newest wins — discard delayed older GPS callbacks.
+    if (!force &&
+        _lastEmitted != null &&
+        timestamp.isBefore(_lastEmitted!.timestamp)) {
+      return;
+    }
+
     final heading = _filter.resolveHeading(
       rawHeading: position.heading,
       speedMetersPerSecond: position.speed,
     );
+    final sequence = ++_emitSequence;
     final snapshot = DriverLocationSnapshot(
       latitude: position.latitude,
       longitude: position.longitude,
       headingDegrees: heading,
       speedMetersPerSecond: position.speed,
       accuracyMeters: position.accuracy,
-      timestamp: position.timestamp,
+      timestamp: timestamp,
+      sequence: sequence,
     );
+
     if (!force &&
         _lastEmitted != null &&
         !_lastEmitted!.isSignificantMarkerChange(snapshot)) {
+      // Still refresh lastSnapshot timestamp/coords for follow when tiny move?
+      // Keep light gate: insignificant → skip UI noise, but allow sub-threshold
+      // only when force. Driving updates usually exceed 1m.
       return;
     }
+
     _lastEmitted = snapshot;
     if (!_controller.isClosed) {
       _controller.add(snapshot);

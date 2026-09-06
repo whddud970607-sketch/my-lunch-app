@@ -33,6 +33,26 @@ class MainActivity : FlutterActivity() {
                     }
                     val intent = Intent(this, KakaoNaviPocActivity::class.java)
                     intent.putExtra(KakaoNaviPocActivity.EXTRA_APP_KEY, appKey)
+                    val sessionJson = call.argument<String>("sessionJson")?.trim()
+                    if (!sessionJson.isNullOrEmpty()) {
+                        intent.putExtra(KakaoNaviPocActivity.EXTRA_SESSION_JSON, sessionJson)
+                    }
+                    startActivity(intent)
+                    result.success(null)
+                }
+                // Diagnostic only: auth-only PoC (does not replace product 길찾기).
+                "launchAuthOnlyPoc" -> {
+                    val appKey = call.argument<String>("appKey")?.trim()
+                    if (appKey.isNullOrEmpty()) {
+                        result.error("missing_key", "Native app key required", null)
+                        return@setMethodCallHandler
+                    }
+                    val intent = Intent(this, KakaoKnsdkAuthOnlyPocActivity::class.java)
+                    intent.putExtra(KakaoKnsdkAuthOnlyPocActivity.EXTRA_APP_KEY, appKey)
+                    val userKey = call.argument<String>("userKey")?.trim()
+                    if (!userKey.isNullOrEmpty()) {
+                        intent.putExtra(KakaoKnsdkAuthOnlyPocActivity.EXTRA_USER_KEY, userKey)
+                    }
                     startActivity(intent)
                     result.success(null)
                 }

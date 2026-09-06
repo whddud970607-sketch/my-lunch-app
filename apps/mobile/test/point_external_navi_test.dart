@@ -26,7 +26,7 @@ MapSpikePoint _point({required double lat, required double lng}) {
 }
 
 void main() {
-  test('NAVIGATE_CTA_WIRING rejects missing coordinates', () {
+  test('invalid coordinate blocks navigation candidates', () {
     expect(
       PointExternalNavi.hasValidDestination(_point(lat: 0, lng: 0)),
       isFalse,
@@ -41,37 +41,78 @@ void main() {
     );
   });
 
-  test('NAVIGATE_CTA_WIRING uses real Point coordinates', () {
-    const lat = 37.4483;
-    const lng = 126.731;
-    expect(
-      PointExternalNavi.hasValidDestination(_point(lat: lat, lng: lng)),
-      isTrue,
-    );
-
+  test('Kakao preferred has no external candidates (in-app only)', () {
     final uris = PointExternalNavi.buildCandidates(
-      latitude: lat,
-      longitude: lng,
+      latitude: 37.4483,
+      longitude: 126.731,
       name: '구월동 1',
       preferredProvider: MapProviderId.kakao,
     );
-    expect(uris, isNotEmpty);
-    expect(uris.first.scheme, 'kakaonavi');
-    final tmapFirst = PointExternalNavi.buildCandidates(
-      latitude: lat,
-      longitude: lng,
+    expect(uris, isEmpty);
+    expect(uris.any(PointExternalNavi.isHandcraftedKakaoNaviUri), isFalse);
+  });
+
+  test('Kakao preferred open never launches external URIs', () async {
+    var launched = false;
+    final ok = await PointExternalNavi.open(
+      latitude: 37.4483,
+      longitude: 126.731,
+      name: '구월동 1',
+      preferredProvider: MapProviderId.kakao,
+      launch: (_) async {
+        launched = true;
+        return true;
+      },
+    );
+    expect(ok, isFalse);
+    expect(launched, isFalse);
+  });
+
+  test('kakaonavi://navigate never in any provider candidates', () {
+    for (final provider in MapProviderId.values) {
+      final uris = PointExternalNavi.buildCandidates(
+        latitude: 37.4483,
+        longitude: 126.731,
+        name: '구월동 1',
+        preferredProvider: provider,
+      );
+      expect(uris.any((u) => u.scheme == 'kakaonavi'), isFalse);
+      expect(uris.any(PointExternalNavi.isHandcraftedKakaoNaviUri), isFalse);
+    }
+  });
+
+  test('TMAP preferred still uses tmap deep link (unchanged)', () async {
+    final seen = <Uri>[];
+    final ok = await PointExternalNavi.open(
+      latitude: 37.4483,
+      longitude: 126.731,
       name: '구월동 1',
       preferredProvider: MapProviderId.tmap,
+      launch: (uri) async {
+        seen.add(uri);
+        return uri.scheme == 'tmap';
+      },
     );
-    expect(tmapFirst.first.scheme, 'tmap');
-    expect(
-      uris.any((u) => u.toString().contains('$lat') && u.toString().contains('$lng')),
-      isTrue,
+    expect(ok, isTrue);
+    expect(seen.first.scheme, 'tmap');
+    expect(seen.first.queryParameters['goalx'], '126.731');
+    expect(seen.first.queryParameters['goaly'], '37.4483');
+  });
+
+  test('Naver preferred still uses nmap deep link (unchanged)', () async {
+    final seen = <Uri>[];
+    final ok = await PointExternalNavi.open(
+      latitude: 37.4483,
+      longitude: 126.731,
+      name: '구월동 1',
+      preferredProvider: MapProviderId.naver,
+      launch: (uri) async {
+        seen.add(uri);
+        return uri.scheme == 'nmap';
+      },
     );
-    expect(
-      uris.any((u) => u.toString().contains('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')),
-      isFalse,
-    );
+    expect(ok, isTrue);
+    expect(seen.first.scheme, 'nmap');
   });
 
   test('labelFor never returns UUID', () {
@@ -79,33 +120,5 @@ void main() {
       PointExternalNavi.labelFor(_point(lat: 37.4, lng: 126.7)),
       '구월동 1',
     );
-  });
-
-  test('open returns false when every launch candidate fails', () async {
-    final ok = await PointExternalNavi.open(
-      latitude: 37.4483,
-      longitude: 126.731,
-      name: '구월동 1',
-      launch: (_) async => false,
-    );
-    expect(ok, isFalse);
-  });
-
-  test('open uses first successful candidate with real coords', () async {
-    final seen = <Uri>[];
-    final ok = await PointExternalNavi.open(
-      latitude: 37.4483,
-      longitude: 126.731,
-      name: '구월동 1',
-      launch: (uri) async {
-        seen.add(uri);
-        return uri.scheme == 'kakaonavi';
-      },
-    );
-    expect(ok, isTrue);
-    expect(seen, isNotEmpty);
-    expect(seen.first.scheme, 'kakaonavi');
-    expect(seen.first.queryParameters['y'], '37.4483');
-    expect(seen.first.queryParameters['x'], '126.731');
   });
 }

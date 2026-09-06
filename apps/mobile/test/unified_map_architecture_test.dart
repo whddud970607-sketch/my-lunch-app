@@ -104,14 +104,35 @@ void main() {
     expect(map.contains('_error != null && _pointsById.isEmpty'), isTrue);
   });
 
-  test('NAVIGATE_CTA_WIRING uses PointExternalNavi not navi POC', () {
+  test('NAVIGATE_CTA_WIRING uses Kakao in-app nav for Kakao map', () {
     final map =
         File('lib/screens/map_spike_screen.dart').readAsStringSync();
-    expect(map.contains('PointExternalNavi'), isTrue);
+    expect(map.contains('KakaoInAppNavi'), isTrue);
     expect(map.contains('_navigateToPoint'), isTrue);
     expect(map.contains('onNavigate:'), isTrue);
-    expect(map.contains('KakaoNaviPocBridge'), isFalse);
     expect(map.contains('TmapNaviPocBridge'), isFalse);
+    expect(map.contains('NaviApi'), isFalse);
+    expect(map.contains('kakaonavi://'), isFalse);
+  });
+
+  test('DELIVERY_LIST_NAVIGATE uses Kakao in-app nav', () {
+    final list =
+        File('lib/screens/delivery_list_screen.dart').readAsStringSync();
+    expect(list.contains('KakaoInAppNavi'), isTrue);
+    expect(list.contains('NaviApi'), isFalse);
+    expect(list.contains('kakaonavi://'), isFalse);
+  });
+
+  test('EXTERNAL_KAKAO_NAVI_SDK not in product navigation sources', () {
+    final navi =
+        File('lib/navigation/point_external_navi.dart').readAsStringSync();
+    final main = File('lib/main.dart').readAsStringSync();
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    expect(navi.contains('kakao_flutter_sdk_navi'), isFalse);
+    expect(navi.contains('NaviApi'), isFalse);
+    expect(main.contains('kakao_flutter_sdk_navi'), isFalse);
+    expect(main.contains('KakaoSdk.init'), isFalse);
+    expect(pubspec.contains('kakao_flutter_sdk_navi'), isFalse);
   });
 
   test('APP_SHELL_BOTTOM_NAV_PRESERVED keeps map tab inside shell', () {

@@ -11,6 +11,9 @@ import '../location/driver_vehicle_type.dart';
 import 'delivery_map_controller.dart';
 
 /// Bridges [DriverLocationService] and map SDK driver-marker APIs.
+///
+/// Follow Mode is for the Delivery Shield map host only — never drives
+/// Kakao KNSDK [KNNaviView] navigation camera.
 class MapLocationCoordinator extends ChangeNotifier {
   MapLocationCoordinator({
     DriverLocationService? locationService,
@@ -22,11 +25,12 @@ class MapLocationCoordinator extends ChangeNotifier {
   DriverVehicleType _vehicle = DriverVehicleSettings.defaultVehicle;
   bool _followEnabled = false;
   bool _permissionDenied = false;
-  DateTime? _lastCameraFollowAt;
   DriverLocationMarkerState? _lastMarkerState;
   StreamSubscription<DriverLocationSnapshot>? _positionSub;
 
-  static const cameraFollowThrottle = Duration(seconds: 1);
+  /// Latest-wins camera generation — older in-flight moves are superseded.
+  int _cameraFollowGeneration = 0;
+
   static const followZoom = 17.0;
 
   DriverLocationService get locationService => _locationService;
@@ -44,14 +48,21 @@ class MapLocationCoordinator extends ChangeNotifier {
 
   void attachMap(DeliveryMapController controller) {
     _mapController = controller;
-    controller.setUserGestureListener(_onUserMapGesture);
+    // Gestures must not disable Follow — only delivery-session end does.
+    controller.setUserGestureListener(null);
+    // Do not sync driver marker synchronously on attach — Kakao pin style
+    // registration is still in flight and concurrent addStyle SIGSEGVs.
     final snapshot = _locationService.lastSnapshot;
-    if (snapshot != null) {
-      _syncDriverMarker(
-        DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
-        force: true,
-      );
-    }
+    if (snapshot == null) return;
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 750), () {
+        if (_mapController != controller) return;
+        _syncDriverMarker(
+          DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
+          force: true,
+        );
+      }),
+    );
   }
 
   void detachMap() {
@@ -86,6 +97,7 @@ class MapLocationCoordinator extends ChangeNotifier {
     final ok = await _locationService.start();
     if (!ok) {
       _permissionDenied = true;
+      _followEnabled = false;
       notifyListeners();
       return false;
     }
@@ -98,6 +110,7 @@ class MapLocationCoordinator extends ChangeNotifier {
     await _locationService.stop();
     await _mapController?.removeDriverMarker();
     _lastMarkerState = null;
+    _followEnabled = false;
     notifyListeners();
   }
 
@@ -106,59 +119,85 @@ class MapLocationCoordinator extends ChangeNotifier {
   }
 
   void _onPosition(DriverLocationSnapshot snapshot) {
+    final previous = _lastMarkerState?.snapshot;
+    if (previous != null && snapshot.isStaleRelativeTo(previous)) {
+      return;
+    }
+
     _syncDriverMarker(
       DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
     );
     if (_followEnabled) {
-      _maybeFollowCamera(snapshot.latitude, snapshot.longitude);
+      _followCameraLatest(snapshot.latitude, snapshot.longitude);
     }
     notifyListeners();
   }
 
+  /// Enables Follow Mode and centers on latest known GPS (if any).
   Future<void> onMyLocationPressed() async {
-    if (!_locationService.hasPermission) {
-      final ok = await _locationService.start();
+    if (!_locationService.hasPermission || !_locationService.isTracking) {
+      final ok = await startTracking();
       if (!ok) {
         _permissionDenied = true;
+        _followEnabled = false;
         notifyListeners();
         return;
       }
       _permissionDenied = false;
     }
-    final snapshot = _locationService.lastSnapshot;
-    if (snapshot == null) return;
+
     _followEnabled = true;
     notifyListeners();
-    await _mapController?.moveCamera(
-      DeliveryLatLng(
-        latitude: snapshot.latitude,
-        longitude: snapshot.longitude,
-      ),
-      zoom: followZoom,
-      programmatic: true,
+
+    final snapshot = _locationService.lastSnapshot;
+    if (snapshot == null) return;
+
+    await _syncDriverMarker(
+      DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
+      force: true,
+    );
+    _followCameraLatest(
+      snapshot.latitude,
+      snapshot.longitude,
+      awaitCompletion: true,
+      applyDefaultZoom: true,
     );
   }
 
   void disableFollow() {
     if (!_followEnabled) return;
     _followEnabled = false;
+    _cameraFollowGeneration++;
     notifyListeners();
   }
 
-  void _onUserMapGesture() => disableFollow();
-
-  Future<void> _maybeFollowCamera(double lat, double lng) async {
-    final now = DateTime.now();
-    if (_lastCameraFollowAt != null &&
-        now.difference(_lastCameraFollowAt!) < cameraFollowThrottle) {
+  /// Latest GPS wins — does not queue multi-second camera animations.
+  ///
+  /// When [applyDefaultZoom] is false (ongoing GPS follow), zoom is omitted so
+  /// the map keeps the user's pinch/zoom level while recentering on the driver.
+  void _followCameraLatest(
+    double lat,
+    double lng, {
+    bool awaitCompletion = false,
+    bool applyDefaultZoom = false,
+  }) {
+    final controller = _mapController;
+    if (controller == null) return;
+    final gen = ++_cameraFollowGeneration;
+    final future = controller.moveCamera(
+      DeliveryLatLng(latitude: lat, longitude: lng),
+      zoom: applyDefaultZoom ? followZoom : null,
+      programmatic: true,
+      followUpdate: true,
+    );
+    if (awaitCompletion) {
+      unawaited(future.then((_) {
+        // Ignore if superseded while awaiting first center.
+        if (gen != _cameraFollowGeneration) return;
+      }));
       return;
     }
-    _lastCameraFollowAt = now;
-    await _mapController?.moveCamera(
-      DeliveryLatLng(latitude: lat, longitude: lng),
-      zoom: followZoom,
-      programmatic: true,
-    );
+    unawaited(future);
   }
 
   Future<void> _syncDriverMarker(

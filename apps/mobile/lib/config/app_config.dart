@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'app_env.dart';
 
 /// App configuration. Publishable/anon + map native keys only — never service_role/REST secret.
 class AppConfig {
   AppConfig._({
+    required this.dsEnv,
     required this.supabaseUrl,
     required this.supabaseAnonKey,
     required this.apiBaseUrl,
@@ -17,6 +21,7 @@ class AppConfig {
     required this.workdayExecutionSessionV1,
   });
 
+  final DsAppEnv dsEnv;
   final String supabaseUrl;
   final String supabaseAnonKey;
   final String apiBaseUrl;
@@ -52,9 +57,19 @@ class AppConfig {
       await dotenv.load(fileName: '.env.example');
     }
 
+    const definedEnv = String.fromEnvironment('DS_ENV');
+    const definedApi = String.fromEnvironment('API_BASE_URL');
+    final dsEnv = ApiBaseUrlRules.parse(
+      definedEnv.isNotEmpty ? definedEnv : (dotenv.env['DS_ENV'] ?? ''),
+    );
     final url = (dotenv.env['SUPABASE_URL'] ?? '').trim();
     final anon = (dotenv.env['SUPABASE_ANON_KEY'] ?? '').trim();
-    final api = (dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:4000/v1').trim();
+    final api = ApiBaseUrlRules.resolve(
+      fromDefine: definedApi,
+      fromDotenv: dotenv.env['API_BASE_URL'] ?? '',
+      env: dsEnv,
+      allowLocalFallback: kDebugMode,
+    );
     final kakaoNative = (dotenv.env['KAKAO_NATIVE_APP_KEY'] ?? '').trim();
     final naverClient = (dotenv.env['NAVER_MAP_CLIENT_ID'] ?? '').trim();
     final tmapClientId = (dotenv.env['TMAP_CLIENT_ID'] ?? '').trim();
@@ -101,6 +116,7 @@ class AppConfig {
     }
 
     instance = AppConfig._(
+      dsEnv: dsEnv,
       supabaseUrl: url.replaceAll(RegExp(r'/$'), ''),
       supabaseAnonKey: anon,
       apiBaseUrl: api.replaceAll(RegExp(r'/$'), ''),

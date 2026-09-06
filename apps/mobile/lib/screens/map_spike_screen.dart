@@ -18,6 +18,7 @@ import '../map/workset_map_filter.dart';
 import '../map/workset_map_filter_chips.dart';
 import '../models/map_spike_point.dart';
 import '../models/today_workset.dart';
+import '../navigation/kakao_in_app_navi.dart';
 import '../navigation/point_external_navi.dart';
 import '../services/api_client.dart';
 import '../services/api_exception.dart';
@@ -592,6 +593,28 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   Future<void> _navigateToPoint(MapSpikePoint point) async {
     if (!PointExternalNavi.hasValidDestination(point)) return;
+
+    if (_mapProviderId == MapProviderId.kakao) {
+      final snap = _locationCoordinator.locationService.lastSnapshot;
+      final worksetPoints = TodayWorksetMapAdapter.applyFilter(
+        _pointsById.values,
+        _filter,
+        workset: _workset,
+      );
+      final ok = await KakaoInAppNavi.open(
+        destination: point,
+        worksetPoints: worksetPoints,
+        startLatitude: snap?.latitude,
+        startLongitude: snap?.longitude,
+      );
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('길찾기를 열 수 없습니다')),
+        );
+      }
+      return;
+    }
+
     final ok = await PointExternalNavi.open(
       latitude: point.latitude,
       longitude: point.longitude,

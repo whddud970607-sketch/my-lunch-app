@@ -3,10 +3,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../map/map_provider_id.dart';
 import '../models/map_spike_point.dart';
 
-/// Opens an installed navi/map app to a real Point coordinate.
+/// Opens an installed navi/map app for non-Kakao map providers.
 ///
-/// Does not use Kakao/TMAP in-app POC activities (those destinations are
-/// hardcoded fixtures). Does not invent fallback coordinates.
+/// Kakao product navigation is in-app only ([KakaoInAppNavi]) — this class
+/// never builds `kakaonavi://` or launches external Kakao Navi.
+/// Does not invent fallback coordinates.
 abstract final class PointExternalNavi {
   static const _fallbackName = '배송지';
 
@@ -26,6 +27,11 @@ abstract final class PointExternalNavi {
     return _fallbackName;
   }
 
+  /// Whether [uri] is a forbidden handcrafted Kakao Navi navigate scheme.
+  static bool isHandcraftedKakaoNaviUri(Uri uri) =>
+      uri.scheme == 'kakaonavi' && uri.host == 'navigate';
+
+  /// Non-Kakao deep links only. Kakao preferred → empty (in-app path).
   static List<Uri> buildCandidates({
     required double latitude,
     required double longitude,
@@ -33,12 +39,11 @@ abstract final class PointExternalNavi {
     MapProviderId preferredProvider = MapProviderId.kakao,
   }) {
     if (!isValidCoordinate(latitude, longitude)) return const [];
+    // Product Kakao navigation must stay in-app — no external candidates.
+    if (preferredProvider == MapProviderId.kakao) return const [];
+
     final encoded = Uri.encodeComponent(
       name.trim().isEmpty ? _fallbackName : name.trim(),
-    );
-    final kakaoNavi = Uri.parse(
-      'kakaonavi://navigate?name=$encoded&coord_type=wgs84'
-      '&x=$longitude&y=$latitude',
     );
     final kakaoMap = Uri.parse(
       'kakaomap://route?ep=$latitude,$longitude&by=CAR',
@@ -52,12 +57,12 @@ abstract final class PointExternalNavi {
     final geo = Uri.parse('geo:$latitude,$longitude?q=$latitude,$longitude');
 
     if (preferredProvider == MapProviderId.naver) {
-      return [naver, tmap, kakaoNavi, kakaoMap, geo];
+      return [naver, tmap, kakaoMap, geo];
     }
     if (preferredProvider == MapProviderId.tmap) {
-      return [tmap, kakaoNavi, kakaoMap, naver, geo];
+      return [tmap, kakaoMap, naver, geo];
     }
-    return [kakaoNavi, kakaoMap, tmap, naver, geo];
+    return const [];
   }
 
   static Future<bool> open({
@@ -67,6 +72,9 @@ abstract final class PointExternalNavi {
     MapProviderId preferredProvider = MapProviderId.kakao,
     Future<bool> Function(Uri uri)? launch,
   }) async {
+    // Kakao = in-app KNNaviView only; never external app launch.
+    if (preferredProvider == MapProviderId.kakao) return false;
+
     final candidates = buildCandidates(
       latitude: latitude,
       longitude: longitude,
@@ -76,6 +84,10 @@ abstract final class PointExternalNavi {
     if (candidates.isEmpty) return false;
     final send = launch ?? _launch;
     for (final uri in candidates) {
+      assert(
+        !isHandcraftedKakaoNaviUri(uri),
+        'handcrafted kakaonavi://navigate must not be used',
+      );
       try {
         if (await send(uri)) return true;
       } catch (_) {

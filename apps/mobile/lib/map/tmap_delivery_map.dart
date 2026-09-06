@@ -163,6 +163,7 @@ class _TmapHostController implements DeliveryMapController {
     DeliveryLatLng target, {
     double? zoom,
     bool programmatic = false,
+    bool followUpdate = false,
   }) async {}
 
   @override

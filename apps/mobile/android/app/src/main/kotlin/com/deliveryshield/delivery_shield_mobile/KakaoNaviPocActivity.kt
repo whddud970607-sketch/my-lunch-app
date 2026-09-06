@@ -51,6 +51,7 @@ class KakaoNaviPocActivity :
 
     companion object {
         const val EXTRA_APP_KEY = "extra_kakao_native_app_key"
+        const val EXTRA_SESSION_JSON = "extra_kakao_nav_session_json"
         private const val PERMISSION_REQUEST_CODE = 9101
         private var sdkAuthCompleted = false
     }
@@ -75,7 +76,14 @@ class KakaoNaviPocActivity :
             finish()
             return
         }
-        sessionState = KakaoNaviPocSessionState(KakaoNaviPocDeliveryFixture.destination)
+        KakaoNaviPocDeliverySource.applySessionJson(
+            intent.getStringExtra(EXTRA_SESSION_JSON),
+        )
+        val destination = KakaoNaviPocDeliverySource.destination()
+        sessionState = KakaoNaviPocSessionState(
+            navigationDestination = destination,
+            initiallyCompleted = KakaoNaviPocDeliverySource.initiallyCompletedNumbers,
+        )
         ensureLocationPermissionThenAuth()
     }
 
@@ -102,6 +110,13 @@ class KakaoNaviPocActivity :
             }
         }
         findViewById<ImageButton>(R.id.btn_close).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.poc_banner)?.let { banner ->
+            banner.text = if (KakaoNaviPocDeliverySource.isProductSession) {
+                "Delivery Shield"
+            } else {
+                "DEVELOPMENT POC"
+            }
+        }
         actionPanel = KakaoNaviPocActionPanelController(
             activity = this,
             sessionState = sessionState,
@@ -166,16 +181,23 @@ class KakaoNaviPocActivity :
         }
 
         val appKey = pendingAppKey ?: return
+        // Match official sample / SDK $default: omit undocumented 4th String (null), not "".
         KNSDK.initializeWithAppKey(
             appKey,
             BuildConfig.VERSION_NAME,
             "delivery_shield_poc_dev",
-            "",
+            null,
             KNLanguageType.KNLanguageType_KOREAN,
         ) { error: KNError? ->
             runOnUiThread {
                 if (error != null) {
-                    KakaoNaviPocDiagnostics.authResult(success = false, errorCode = error.code?.toString())
+                    KakaoNaviPocDiagnostics.authResult(
+                        success = false,
+                        errorCode = error.code,
+                        errorMsg = error.msg,
+                        errorTagMsg = error.tagMsg,
+                        extraType = error.extra?.javaClass?.simpleName,
+                    )
                     toast("Kakao nav SDK auth failed (${error.code})")
                     finish()
                 } else {
@@ -259,18 +281,35 @@ class KakaoNaviPocActivity :
     }
 
     private fun deliveryRoutePois(): Pair<KNPOI, KNPOI> {
-        val destination = KakaoNaviPocDeliveryFixture.destination
-        val startPoi = poiFromKatec(
-            KakaoNaviPocDeliveryFixture.START_LABEL,
-            KakaoNaviPocDeliveryFixture.START_KATEC_X,
-            KakaoNaviPocDeliveryFixture.START_KATEC_Y,
-        )
+        val destination = sessionState.navigationDestination
+        val startPoi = productOrFixtureStartPoi()
         val goalPoi = poiFromKatec(
             "DELIVERY_${destination.deliveryNumber}",
             destination.katecX,
             destination.katecY,
         )
         return startPoi to goalPoi
+    }
+
+    private fun productOrFixtureStartPoi(): KNPOI {
+        val startLat = KakaoNaviPocDeliverySource.productStartLatitude
+        val startLng = KakaoNaviPocDeliverySource.productStartLongitude
+        if (startLat != null && startLng != null &&
+            startLat != 0.0 && startLng != 0.0 &&
+            startLat.isFinite() && startLng.isFinite()
+        ) {
+            val katec = com.kakaomobility.knsdk.common.gps.WGS84ToKATEC(startLng, startLat)
+            return poiFromKatec(
+                "DRIVER_START",
+                katec.x.toFloat(),
+                katec.y.toFloat(),
+            )
+        }
+        return poiFromKatec(
+            KakaoNaviPocDeliveryFixture.START_LABEL,
+            KakaoNaviPocDeliveryFixture.START_KATEC_X,
+            KakaoNaviPocDeliveryFixture.START_KATEC_Y,
+        )
     }
 
     private fun poiFromKatec(label: String, katecX: Float, katecY: Float): KNPOI {
@@ -371,6 +410,9 @@ class KakaoNaviPocActivity :
             }
             try {
                 markerHelper?.attachToNavigationMap(mapView)
+                sessionState.completedDeliveryPoints.forEach { number ->
+                    markerHelper?.markDeliveryCompleted(number)
+                }
             } catch (error: Throwable) {
                 KakaoNaviPocDiagnostics.caught("guidance_started_markers", error)
             }
@@ -380,6 +422,7 @@ class KakaoNaviPocActivity :
     override fun onDestroy() {
         KakaoNaviPocDiagnostics.lifecycle("onDestroy")
         markerHelper?.clearMarkers()
+        KakaoNaviPocDeliverySource.clear()
         super.onDestroy()
     }
 

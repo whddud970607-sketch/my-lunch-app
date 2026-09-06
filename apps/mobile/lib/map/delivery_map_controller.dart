@@ -22,10 +22,15 @@ abstract class DeliveryMapController {
 
   /// Move camera without fitting all pins (e.g. focus Seoul stop from list).
   /// [programmatic] true for follow-mode moves (ignored for user-gesture detection).
+  /// [followUpdate] uses a short/no animation so GPS updates are not queued behind
+  /// long camera animations (latest position wins).
+  /// When [zoom] is null and [followUpdate] is true, preserve the current map zoom
+  /// (user pinch/zoom must not be reset by GPS follow).
   Future<void> moveCamera(
     DeliveryLatLng target, {
     double? zoom,
     bool programmatic = false,
+    bool followUpdate = false,
   });
 
   /// Driver GPS marker — separate layer/id from delivery pins.
@@ -44,7 +49,8 @@ abstract class DeliveryMapController {
     DeliveryLatLng? end,
   });
 
-  /// Called when the user drags/pans the map (not programmatic camera moves).
+  /// Optional user-gesture hook. Follow Mode must NOT disable on pan/zoom;
+  /// only delivery-session end turns Follow OFF.
   void setUserGestureListener(void Function()? onUserGesture);
 }
 

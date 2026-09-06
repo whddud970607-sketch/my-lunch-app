@@ -38,6 +38,11 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   bool _markersPlaced = false;
   bool _driverLayerReady = false;
   bool _programmaticCameraMove = false;
+  /// After pin styles settle — concurrent registerMarkerStyles crashes Kakao GL
+  /// (SIGSEGV LabelPerLevelStyle / MapLabelManager.addStyle).
+  bool _labelStyleSurfaceReady = false;
+  Future<void>? _labelStyleChain;
+  DriverLocationMarkerState? _pendingDriverMarker;
   final KakaoMapHostGuard<KakaoMapController> _host = KakaoMapHostGuard();
   void Function()? _onUserGesture;
   final KakaoDriverMarkerStyleCache _driverStyles =
@@ -89,6 +94,8 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     _driverMarkerLng = null;
     _driverLayerReady = false;
     _markersPlaced = false;
+    _labelStyleSurfaceReady = false;
+    _pendingDriverMarker = null;
     await _labelSub?.cancel();
     if (!_isCurrentController(controller)) return;
     _labelSub = controller.onLabelClickedStream.listen((event) {
@@ -104,10 +111,37 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
       }
       _onUserGesture?.call();
     });
-    widget.onReady(this);
+    // Register delivery pin styles BEFORE exposing controller for driver GPS
+    // marker styles — concurrent Kakao registerMarkerStyles SIGSEGVs GLThread.
     if (_pins.isNotEmpty) {
       await syncPins(_pins);
+    } else {
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!_isCurrentController(controller)) return;
+      _labelStyleSurfaceReady = true;
     }
+    if (!_isCurrentController(controller)) return;
+    widget.onReady(this);
+    await _flushPendingDriverMarker();
+  }
+
+  /// Serialize Kakao label-style registration — concurrent calls SIGSEGV on GLThread.
+  Future<T> _runLabelStyleOp<T>(Future<T> Function() op) {
+    final previous = _labelStyleChain;
+    final gate = Completer<void>();
+    _labelStyleChain = gate.future;
+    return () async {
+      try {
+        if (previous != null) {
+          try {
+            await previous;
+          } catch (_) {}
+        }
+        return await op();
+      } finally {
+        if (!gate.isCompleted) gate.complete();
+      }
+    }();
   }
 
   Future<void> _registerQuantityStyles(
@@ -126,6 +160,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         pin.totalQuantity,
         status: pin.visualStatus,
       );
+      if (bytes.isEmpty) continue;
       styles.add(
         MarkerStyle(
           styleId: styleId,
@@ -135,9 +170,11 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         ),
       );
     }
-    if (styles.isNotEmpty) {
+    if (styles.isEmpty) return;
+    await _runLabelStyleOp(() async {
+      if (!_isCurrentController(controller)) return;
       await controller.registerMarkerStyles(styles: styles);
-    }
+    });
   }
 
   @override
@@ -219,6 +256,8 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         ),
       );
       _markersPlaced = true;
+      _labelStyleSurfaceReady = true;
+      await _flushPendingDriverMarker();
       return;
     }
 
@@ -241,6 +280,8 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         ),
       );
     }
+    _labelStyleSurfaceReady = true;
+    await _flushPendingDriverMarker();
   }
 
   @override
@@ -284,10 +325,27 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     }
   }
 
+  Future<void> _flushPendingDriverMarker() async {
+    final pending = _pendingDriverMarker;
+    if (pending == null) return;
+    _pendingDriverMarker = null;
+    await upsertDriverMarker(pending);
+  }
+
   @override
   Future<void> upsertDriverMarker(DriverLocationMarkerState state) async {
     final controller = _controller;
     if (controller == null || _disposed) return;
+    if (!_labelStyleSurfaceReady) {
+      // Defer until pin styles / GL settle — avoids LabelPerLevelStyle SIGSEGV.
+      _pendingDriverMarker = state;
+      return;
+    }
+    if (!state.latitude.isFinite ||
+        !state.longitude.isFinite ||
+        (state.latitude == 0 && state.longitude == 0)) {
+      return;
+    }
     await _ensureDriverLayer(controller);
     if (!_isCurrentController(controller)) return;
 
@@ -310,17 +368,21 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
         accuracyMeters: state.accuracyMeters,
         sessionActive: state.sessionActive,
       );
+      if (bytes.isEmpty) return;
       if (!_isCurrentController(controller)) return;
-      await controller.registerMarkerStyles(
-        styles: [
-          MarkerStyle(
-            styleId: styleId,
-            perLevels: [
-              MarkerPerLevelStyle.fromBytes(bytes: bytes, level: 0),
-            ],
-          ),
-        ],
-      );
+      await _runLabelStyleOp(() async {
+        if (!_isCurrentController(controller)) return;
+        await controller.registerMarkerStyles(
+          styles: [
+            MarkerStyle(
+              styleId: styleId,
+              perLevels: [
+                MarkerPerLevelStyle.fromBytes(bytes: bytes, level: 0),
+              ],
+            ),
+          ],
+        );
+      });
       if (!_isCurrentController(controller)) return;
       _driverStyles.markRegistered(styleId);
     }
@@ -450,27 +512,44 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     DeliveryLatLng target, {
     double? zoom,
     bool programmatic = false,
+    bool followUpdate = false,
   }) async {
     final controller = _controller;
     if (controller == null || _disposed) return;
+    if (programmatic) {
+      _programmaticCameraMove = true;
+    }
+    // Follow GPS without zoom: keep current level so pinch/zoom is preserved.
+    final int zoomLevel;
+    if (zoom != null) {
+      zoomLevel = zoom.round();
+    } else if (followUpdate) {
+      zoomLevel = await controller.getZoomLevel() ??
+          (widget.pins.length > 1 ? 14 : 17);
+    } else {
+      zoomLevel = widget.pins.length > 1 ? 14 : 17;
+    }
+    if (!_isCurrentController(controller)) return;
     await controller.moveCamera(
       cameraUpdate: CameraUpdate(
         position: LatLng(
           latitude: target.latitude,
           longitude: target.longitude,
         ),
-        zoomLevel: zoom?.round() ?? (widget.pins.length > 1 ? 14 : 17),
+        zoomLevel: zoomLevel,
         type: 0,
       ),
-      animation: const CameraAnimation(
-        duration: 500,
-        autoElevation: true,
-        isConsecutive: false,
+      animation: CameraAnimation(
+        // Follow GPS: short consecutive updates; avoid 500ms queue lag.
+        duration: followUpdate ? 100 : 500,
+        autoElevation: !followUpdate,
+        isConsecutive: followUpdate,
       ),
     );
   }
   @override
   Widget build(BuildContext context) {
+    debugPrint('[MAP] kakao widget created');
     return KakaoMap(
       key: _mapKey,
       onMapCreated: _onMapCreated,

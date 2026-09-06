@@ -32,7 +32,7 @@ class KakaoNaviPocMarkerHelper(
     private var markersAttached = false
     private var preservedListener: KNMarkerEventListener? = null
     private var tapListener: KakaoNaviPocMarkerTapListener? = null
-    private var navigationDestinationNumber = KakaoNaviPocDeliveryFixture.destination.deliveryNumber
+    private var navigationDestinationNumber = 1
     private val completedNumbers = mutableSetOf<Int>()
 
     fun setOnDeliveryMarkerTapListener(listener: KakaoNaviPocMarkerTapListener?) {
@@ -121,11 +121,12 @@ class KakaoNaviPocMarkerHelper(
     }
 
     private fun selectedDeliveries(): List<KakaoNaviPocDelivery> {
+        val all = KakaoNaviPocDeliverySource.activeDeliveries()
+        // Product in-app nav must keep every workset pin; PoC limit is fixture-only.
+        if (KakaoNaviPocDeliverySource.isProductSession) return all
         return when {
-            KakaoNaviPocConfig.MARKER_COUNT_LIMIT <= 0 ->
-                KakaoNaviPocDeliveryFixture.deliveries
-            else ->
-                KakaoNaviPocDeliveryFixture.deliveries.take(KakaoNaviPocConfig.MARKER_COUNT_LIMIT)
+            KakaoNaviPocConfig.MARKER_COUNT_LIMIT <= 0 -> all
+            else -> all.take(KakaoNaviPocConfig.MARKER_COUNT_LIMIT)
         }
     }
 
@@ -211,7 +212,8 @@ class KakaoNaviPocMarkerHelper(
         (marker.info as? KakaoNaviPocDelivery)?.let { return it }
         val tag = marker.tag
         if (tag > 0) {
-            return KakaoNaviPocDeliveryFixture.deliveries.firstOrNull { it.deliveryNumber == tag }
+            return KakaoNaviPocDeliverySource.activeDeliveries()
+                .firstOrNull { it.deliveryNumber == tag }
         }
         return null
     }

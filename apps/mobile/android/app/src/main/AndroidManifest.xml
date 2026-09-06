@@ -35,6 +35,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Diagnostic only: custom action, not LAUNCHER. Exported for adb isolation run. -->
+        <activity
+            android:name=".KakaoKnsdkAuthOnlyPocActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
+            <intent-filter>
+                <action android:name="com.deliveryshield.delivery_shield_mobile.KNSDK_AUTH_ONLY_POC"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
         <activity
             android:name=".KakaoNaviPocActivity"
             android:exported="false"

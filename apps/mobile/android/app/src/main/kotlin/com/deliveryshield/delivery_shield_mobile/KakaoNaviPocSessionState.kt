@@ -7,11 +7,12 @@ package com.deliveryshield.delivery_shield_mobile
  */
 class KakaoNaviPocSessionState(
     val navigationDestination: KakaoNaviPocDelivery,
+    initiallyCompleted: Set<Int> = emptySet(),
 ) {
     var selectedDeliveryPoint: KakaoNaviPocDelivery? = null
         private set
 
-    private val completedNumbers = mutableSetOf<Int>()
+    private val completedNumbers = initiallyCompleted.toMutableSet()
 
     val completedDeliveryPoints: Set<Int>
         get() = completedNumbers.toSet()

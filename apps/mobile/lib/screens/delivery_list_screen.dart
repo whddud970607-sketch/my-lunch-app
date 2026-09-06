@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../copy/driver_chrome_copy.dart';
+import '../map/today_workset_map_adapter.dart';
 import '../map/workset_map_filter.dart';
 import '../models/map_spike_point.dart';
 import '../models/today_workset.dart';
+import '../navigation/kakao_in_app_navi.dart';
 import '../navigation/point_external_navi.dart';
 import '../services/api_exception.dart';
 import '../services/map_spike_service.dart';
@@ -209,10 +211,14 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
 
   Future<void> _navigateToPoint(MapSpikePoint point) async {
     if (!PointExternalNavi.hasValidDestination(point)) return;
-    final ok = await PointExternalNavi.open(
-      latitude: point.latitude,
-      longitude: point.longitude,
-      name: PointExternalNavi.labelFor(point),
+    final workset = _workset;
+    final driverId = widget.controller.me?.driver?.id ?? '';
+    final worksetPoints = workset == null
+        ? <MapSpikePoint>[point]
+        : TodayWorksetMapAdapter.toMapPoints(workset, driverId: driverId);
+    final ok = await KakaoInAppNavi.open(
+      destination: point,
+      worksetPoints: worksetPoints,
     );
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

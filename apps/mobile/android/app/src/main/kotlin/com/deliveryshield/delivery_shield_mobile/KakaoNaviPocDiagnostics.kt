@@ -15,11 +15,23 @@ object KakaoNaviPocDiagnostics {
         Log.i(TAG, "lifecycle event=$event")
     }
 
-    fun authResult(success: Boolean, errorCode: String? = null) {
+    fun authResult(
+        success: Boolean,
+        errorCode: String? = null,
+        errorMsg: String? = null,
+        errorTagMsg: String? = null,
+        extraType: String? = null,
+    ) {
         if (success) {
             Log.i(TAG, "sdk_auth success=true")
         } else {
-            Log.w(TAG, "sdk_auth success=false errorCode=${errorCode ?: "unknown"}")
+            // Never log appKey / credentials — code/msg/tagMsg/extra type only.
+            Log.w(
+                TAG,
+                "sdk_auth success=false errorCode=${errorCode ?: "unknown"} " +
+                    "msg=${errorMsg ?: ""} tagMsg=${errorTagMsg ?: ""} " +
+                    "extraType=${extraType ?: ""}",
+            )
         }
     }
 

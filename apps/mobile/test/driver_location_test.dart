@@ -37,7 +37,7 @@ void main() {
   });
 
   group('DriverLocationSnapshot', () {
-    test('significant when moved >= 5m', () {
+    test('significant when moved >= 1m', () {
       final t = DateTime.utc(2026, 1, 1);
       final a = DriverLocationSnapshot(
         latitude: 37.5,
@@ -48,7 +48,7 @@ void main() {
         timestamp: t,
       );
       final b = DriverLocationSnapshot(
-        latitude: 37.50005,
+        latitude: 37.50001,
         longitude: 127.0,
         headingDegrees: 0,
         speedMetersPerSecond: 5,
