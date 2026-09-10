@@ -79,6 +79,12 @@ class _FakeMap implements DeliveryMapController {
     void Function()? onRefresh,
     void Function()? onProviderMenu,
   }) {}
+
+  @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
 }
 
 DriverLocationService _okGps() {

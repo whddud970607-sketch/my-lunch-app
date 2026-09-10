@@ -107,6 +107,12 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     void Function()? onProviderMenu,
   }) {}
 
+  @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
+
   Future<void> _onMapCreated(KakaoMapController controller) async {
     if (_host.disposed) return;
     _host.attach(controller);

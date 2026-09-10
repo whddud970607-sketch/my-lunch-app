@@ -279,7 +279,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   }
 
   void _onLocationCoordinatorChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    _pushTmapNativeHud();
   }
 
   @override
@@ -399,6 +401,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         _refreshing = true;
         _error = null;
       });
+      _pushTmapNativeHud();
     } else {
       setState(() {
         _loading = true;
@@ -469,6 +472,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         _refreshing = false;
         _error = null;
       });
+      _pushTmapNativeHud();
       await _syncPinsToMap();
       final pendingFocus = _pendingFocusPointId ?? widget.focusPointId;
       if (pendingFocus != null && pendingFocus.isNotEmpty) {
@@ -499,6 +503,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           _pinsByMarkerId.clear();
         }
       });
+      _pushTmapNativeHud();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -510,6 +515,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           _pinsByMarkerId.clear();
         }
       });
+      _pushTmapNativeHud();
     }
   }
 
@@ -586,31 +592,53 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     );
   }
 
-  void _showTmapProviderPicker() {
+  Future<void> _showTmapProviderPicker() async {
     if (!mounted) return;
-    showModalBottomSheet<void>(
+    final controller = _mapController;
+
+    // Deterministic: Flutter requests dismiss; native ack before showMenu.
+    await controller?.setHudPopupsVisible(false);
+    if (!mounted) return;
+
+    // Extra frame so Overlay is free of PopupWindow.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final overlay = Overlay.maybeOf(context);
+    final navigator = Navigator.maybeOf(context);
+    if (overlay == null || navigator == null) {
+      await controller?.setHudPopupsVisible(true);
+      _pushTmapNativeHud();
+      return;
+    }
+
+    final media = MediaQuery.of(context);
+    final top = media.padding.top + AppSpacing.sm + 48;
+    final selected = await showMenu<MapProviderId>(
       context: context,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final id in MapProviderId.values)
-                ListTile(
-                  title: Text(id.displayLabel),
-                  trailing: id == _mapProviderId
-                      ? const Icon(Icons.check)
-                      : null,
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    _changeMapProvider(id);
-                  },
-                ),
-            ],
+      position: RelativeRect.fromLTRB(
+        media.size.width - AppSpacing.sm,
+        top,
+        AppSpacing.sm,
+        0,
+      ),
+      initialValue: _mapProviderId,
+      items: [
+        for (final id in MapProviderId.values)
+          CheckedPopupMenuItem<MapProviderId>(
+            value: id,
+            checked: id == _mapProviderId,
+            child: Text(id.displayLabel),
           ),
-        );
-      },
+      ],
     );
+
+    if (!mounted) return;
+    if (selected != null && selected != _mapProviderId) {
+      await _changeMapProvider(selected);
+      return;
+    }
+    await controller?.setHudPopupsVisible(true);
+    _pushTmapNativeHud();
   }
 
   void _applyFocusPoint(String focusId) {
@@ -1089,11 +1117,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     final showLoading = _loading && _pointsById.isEmpty;
     final showError = _error != null && _pointsById.isEmpty;
     final isTmap = _mapProviderId == MapProviderId.tmap;
-    if (isTmap) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _pushTmapNativeHud();
-      });
-    }
+    // Do NOT push native HUD on every rebuild — PopupWindow.update thrash
+    // cancels in-progress taps on the provider/refresh buttons.
 
     return Stack(
       fit: StackFit.expand,

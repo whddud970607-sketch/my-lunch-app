@@ -2,23 +2,25 @@ package com.deliveryshield.delivery_shield_mobile
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -26,6 +28,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.ImageViewCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.skt.tmap.TMapData
@@ -79,13 +82,29 @@ class TmapVectorMapPlatformView(
     private lateinit var hudCompleted: TextView
     private lateinit var hudRemaining: TextView
     private lateinit var hudSummaryRow: LinearLayout
-    private lateinit var refreshBtn: ImageButton
-    private lateinit var layersBtn: ImageButton
+    private lateinit var refreshBtn: View
+    private lateinit var layersBtn: View
     private lateinit var refreshSpinner: ProgressBar
     private lateinit var myLocationBtn: FrameLayout
     private lateinit var myLocationIcon: ImageView
     private var hudLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
     private var followActiveVisual = false
+    /** When true, [ensureHudWindowsVisible] is a no-op (Flutter menu is open). */
+    private var hudPopupsSuppressed = false
+    /** Freeze geometry while a HUD button gesture is in progress. */
+    private var hudTouchActive = false
+    private var lastSummaryPopupX = Int.MIN_VALUE
+    private var lastSummaryPopupY = Int.MIN_VALUE
+    private var lastSummaryPopupW = -1
+    private var lastLocationPopupX = Int.MIN_VALUE
+    private var lastLocationPopupY = Int.MIN_VALUE
+    private var lastHudFingerprint: String? = null
+    private var providerBoundsLogged = false
+    /** Screen center of provider button for ADB proof taps. */
+    private var providerBtnScreenX = -1
+    private var providerBtnScreenY = -1
+    private var providerBtnHitW = 0
+    private var providerBtnHitH = 0
 
     private var disposed = false
     private var mapReadyEmitted = false
@@ -362,6 +381,48 @@ class TmapVectorMapPlatformView(
                 runOnUi {
                     applyShieldHud(args)
                     result.success(null)
+                }
+            }
+            "setHudPopupsVisible" -> {
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as? Map<String, Any?>
+                val visible = args?.get("visible") as? Boolean ?: true
+                runOnUi {
+                    if (visible) {
+                        hudPopupsSuppressed = false
+                        hudTouchActive = false
+                        ensureHudWindowsVisible()
+                        result.success(
+                            mapOf(
+                                "visible" to true,
+                                "summaryShowing" to (summaryPopup?.isShowing == true),
+                            ),
+                        )
+                    } else {
+                        hudPopupsSuppressed = true
+                        hudTouchActive = false
+                        dismissHudWindows()
+                        result.success(
+                            mapOf(
+                                "visible" to false,
+                                "summaryShowing" to false,
+                                "dismissed" to true,
+                            ),
+                        )
+                    }
+                }
+            }
+            "getProviderButtonScreenCoords" -> {
+                runOnUi {
+                    result.success(
+                        mapOf(
+                            "x" to providerBtnScreenX,
+                            "y" to providerBtnScreenY,
+                            "width" to providerBtnHitW,
+                            "height" to providerBtnHitH,
+                            "ready" to (providerBtnScreenX >= 0 && providerBtnScreenY >= 0),
+                        ),
+                    )
                 }
             }
             "moveCamera" -> {
@@ -1022,7 +1083,6 @@ class TmapVectorMapPlatformView(
         }
         header.addView(hudTitle)
 
-        val iconBtnSize = style.dp(style.headerIconButtonSizeDp)
         refreshSpinner = ProgressBar(context).apply {
             layoutParams = LinearLayout.LayoutParams(style.dp(18f), style.dp(18f)).apply {
                 marginStart = style.dp(style.sm)
@@ -1034,23 +1094,24 @@ class TmapVectorMapPlatformView(
         }
         header.addView(refreshSpinner)
 
-        refreshBtn = ImageButton(context).apply {
-            layoutParams = LinearLayout.LayoutParams(iconBtnSize, iconBtnSize)
-            setBackgroundColor(Color.TRANSPARENT)
-            setImageResource(R.drawable.ic_ds_refresh)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            contentDescription = "새로고침"
-            setOnClickListener { emit("onRefreshPressed", emptyMap()) }
+        refreshBtn = styleHeaderIconButton(
+            context,
+            contentDescription = "새로고침",
+            iconRes = R.drawable.ic_ds_refresh,
+        ) {
+            emit("onRefreshPressed", emptyMap())
         }
         header.addView(refreshBtn)
 
-        layersBtn = ImageButton(context).apply {
-            layoutParams = LinearLayout.LayoutParams(iconBtnSize, iconBtnSize)
-            setBackgroundColor(Color.TRANSPARENT)
-            setImageResource(R.drawable.ic_ds_layers)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            contentDescription = "지도 제공자"
-            setOnClickListener { emit("onProviderMenuPressed", emptyMap()) }
+        layersBtn = styleHeaderIconButton(
+            context,
+            contentDescription = "지도 제공자",
+            iconRes = R.drawable.ic_ds_layers,
+            trackProviderTouch = true,
+        ) {
+            // Do NOT dismiss here — gesture must complete first.
+            // Flutter dismisses via setHudPopupsVisible(false) then showMenu.
+            emit("onProviderMenuPressed", emptyMap())
         }
         header.addView(layersBtn)
 
@@ -1080,12 +1141,15 @@ class TmapVectorMapPlatformView(
         hudSummaryRow.addView(hudRemaining)
         hudCard.addView(hudSummaryRow)
 
+        val cardMargin = style.dp(style.cardMarginDp)
         summaryRoot.addView(
             hudCard,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ),
+            ).apply {
+                setMargins(cardMargin, cardMargin, cardMargin, cardMargin)
+            },
         )
 
         val btnSize = style.dp(style.locationButtonSizeDp)
@@ -1114,9 +1178,64 @@ class TmapVectorMapPlatformView(
         }
     }
 
+    private fun styleHeaderIconButton(
+        context: Context,
+        contentDescription: String,
+        iconRes: Int,
+        trackProviderTouch: Boolean = false,
+        onClick: () -> Unit,
+    ): FrameLayout {
+        val size = style.dp(style.headerIconButtonSizeDp)
+        val pad = style.dp(style.headerIconPaddingDp)
+        val iconSize = style.dp(style.headerIconSizeDp)
+        val icon = ImageView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
+            setImageResource(iconRes)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            ImageViewCompat.setImageTintList(
+                this,
+                ColorStateList.valueOf(style.textPrimary),
+            )
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        return FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(size, size)
+            setPadding(pad, pad, pad, pad)
+            this.contentDescription = contentDescription
+            isClickable = true
+            isFocusable = true
+            isEnabled = true
+            foreground = RippleDrawable(
+                ColorStateList.valueOf(Color.argb(0x33, 0xF8, 0xFA, 0xFC)),
+                null,
+                ColorDrawable(Color.WHITE),
+            )
+            if (trackProviderTouch) {
+                setOnTouchListener { v, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            hudTouchActive = true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            // Keep freeze until onClick runs; clear after.
+                            v.post { hudTouchActive = false }
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            hudTouchActive = false
+                        }
+                    }
+                    false // allow click delivery
+                }
+            }
+            setOnClickListener { onClick() }
+            addView(icon)
+        }
+    }
+
     private fun wireHudLayoutTracking() {
         val listener = ViewTreeObserver.OnGlobalLayoutListener {
             if (disposed) return@OnGlobalLayoutListener
+            if (hudTouchActive || hudPopupsSuppressed) return@OnGlobalLayoutListener
             if (container.width <= 0 || container.height <= 0) return@OnGlobalLayoutListener
             ensureHudWindowsVisible()
         }
@@ -1126,6 +1245,8 @@ class TmapVectorMapPlatformView(
 
     private fun ensureHudWindowsVisible() {
         if (disposed) return
+        if (hudPopupsSuppressed) return
+        if (hudTouchActive) return
         if (!container.isAttachedToWindow) return
         if (container.width <= 0 || container.height <= 0) return
         if (!::style.isInitialized) return
@@ -1138,34 +1259,44 @@ class TmapVectorMapPlatformView(
         val topPad = safeTopExtra + style.dp(style.overlayMarginTopDp)
         val sidePad = style.dp(style.overlayMarginHorizontalDp)
         val summaryWidth = (container.width - sidePad * 2).coerceAtLeast(style.dp(200f))
+        val summaryX = loc[0] + sidePad
+        val summaryY = loc[1] + topPad
 
         if (summaryPopup == null) {
             summaryPopup = PopupWindow(
                 summaryRoot,
                 summaryWidth,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                false,
+                /* focusable = */ false,
             ).apply {
                 isOutsideTouchable = false
                 isFocusable = false
                 isTouchable = true
+                // Transparent bg required so touches hit content views.
                 setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
                 elevation = style.dp(8f).toFloat()
                 if (Build.VERSION.SDK_INT >= 29) {
+                    // Allow map gestures outside HUD; keep HUD content touchable.
                     isTouchModal = false
                 }
             }
-        } else {
-            summaryPopup?.width = summaryWidth
+            lastSummaryPopupX = Int.MIN_VALUE
+            lastSummaryPopupY = Int.MIN_VALUE
+            lastSummaryPopupW = -1
         }
 
         val btnSize = style.dp(style.locationButtonSizeDp)
+        val locationX = loc[0] + container.width - btnSize -
+            style.dp(style.locationMarginRightDp)
+        val locationY = loc[1] + container.height - btnSize -
+            style.dp(style.locationMarginBottomDp)
+
         if (locationPopup == null) {
             locationPopup = PopupWindow(
                 myLocationBtn,
                 btnSize,
                 btnSize,
-                false,
+                /* focusable = */ false,
             ).apply {
                 isOutsideTouchable = false
                 isFocusable = false
@@ -1176,30 +1307,59 @@ class TmapVectorMapPlatformView(
                     isTouchModal = false
                 }
             }
+            lastLocationPopupX = Int.MIN_VALUE
+            lastLocationPopupY = Int.MIN_VALUE
         }
 
         try {
             val summary = summaryPopup!!
-            val x = loc[0] + sidePad
-            val y = loc[1] + topPad
-            if (summary.isShowing) {
-                summary.update(x, y, summaryWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true)
-            } else {
-                summary.showAtLocation(container, Gravity.NO_GRAVITY, x, y)
+            val summaryChanged = summaryX != lastSummaryPopupX ||
+                summaryY != lastSummaryPopupY ||
+                summaryWidth != lastSummaryPopupW
+            if (!summary.isShowing) {
+                summary.showAtLocation(container, Gravity.NO_GRAVITY, summaryX, summaryY)
+                lastSummaryPopupX = summaryX
+                lastSummaryPopupY = summaryY
+                lastSummaryPopupW = summaryWidth
+            } else if (summaryChanged) {
+                // Avoid force-update on every layout — cancels in-progress taps.
+                summary.update(summaryX, summaryY, summaryWidth, -1)
+                lastSummaryPopupX = summaryX
+                lastSummaryPopupY = summaryY
+                lastSummaryPopupW = summaryWidth
             }
 
             val location = locationPopup!!
-            val lx = loc[0] + container.width - btnSize -
-                style.dp(style.locationMarginRightDp)
-            val ly = loc[1] + container.height - btnSize -
-                style.dp(style.locationMarginBottomDp)
-            if (location.isShowing) {
-                location.update(lx, ly, btnSize, btnSize, true)
-            } else {
-                location.showAtLocation(container, Gravity.NO_GRAVITY, lx, ly)
+            val locationChanged = locationX != lastLocationPopupX ||
+                locationY != lastLocationPopupY
+            if (!location.isShowing) {
+                location.showAtLocation(container, Gravity.NO_GRAVITY, locationX, locationY)
+                lastLocationPopupX = locationX
+                lastLocationPopupY = locationY
+            } else if (locationChanged) {
+                location.update(locationX, locationY, btnSize, btnSize)
+                lastLocationPopupX = locationX
+                lastLocationPopupY = locationY
             }
+
+            layersBtn.post { refreshProviderButtonBounds() }
         } catch (t: Throwable) {
             Log.w(tag, "tmap hud show failed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun refreshProviderButtonBounds() {
+        if (!::layersBtn.isInitialized) return
+        val hit = android.graphics.Rect()
+        layersBtn.getHitRect(hit)
+        val screen = IntArray(2)
+        layersBtn.getLocationOnScreen(screen)
+        providerBtnHitW = layersBtn.width
+        providerBtnHitH = layersBtn.height
+        providerBtnScreenX = screen[0] + providerBtnHitW / 2
+        providerBtnScreenY = screen[1] + providerBtnHitH / 2
+        if (!providerBoundsLogged && providerBtnHitW > 0) {
+            providerBoundsLogged = true
         }
     }
 
@@ -1214,10 +1374,22 @@ class TmapVectorMapPlatformView(
         }
         summaryPopup = null
         locationPopup = null
+        lastSummaryPopupX = Int.MIN_VALUE
+        lastSummaryPopupY = Int.MIN_VALUE
+        lastSummaryPopupW = -1
+        lastLocationPopupX = Int.MIN_VALUE
+        lastLocationPopupY = Int.MIN_VALUE
+        providerBoundsLogged = false
+        providerBtnScreenX = -1
+        providerBtnScreenY = -1
     }
 
     private fun applyShieldHud(args: Map<String, Any?>?) {
         if (disposed || !::style.isInitialized) return
+        if (hudTouchActive) {
+            // Touch gesture atomic: defer layout/window churn until UP/onClick.
+            return
+        }
         val title = (args?.get("title") as? String)?.trim().orEmpty()
             .ifEmpty { TmapHudStyle.DEFAULT_TITLE }
         val showSummary = args?.get("showSummary") as? Boolean ?: true
@@ -1228,33 +1400,43 @@ class TmapVectorMapPlatformView(
         val myLocationEnabled = args?.get("myLocationEnabled") as? Boolean ?: true
         val refreshing = args?.get("refreshing") as? Boolean ?: false
 
-        hudTitle.text = title
-        hudTotal.text = "전체 $total"
-        hudCompleted.text = "완료 $completed"
-        hudRemaining.text = "남음 $remaining"
-        hudSummaryRow.visibility = if (showSummary) View.VISIBLE else View.GONE
+        val fingerprint =
+            "$title|$showSummary|$total|$completed|$remaining|$followActive|$myLocationEnabled|$refreshing"
+        val dataChanged = fingerprint != lastHudFingerprint
+        lastHudFingerprint = fingerprint
 
-        refreshSpinner.visibility = if (refreshing) View.VISIBLE else View.GONE
-        refreshBtn.visibility = if (refreshing) View.GONE else View.VISIBLE
+        if (dataChanged) {
+            hudTitle.text = title
+            hudTotal.text = "전체 $total"
+            hudCompleted.text = "완료 $completed"
+            hudRemaining.text = "남음 $remaining"
+            hudSummaryRow.visibility = if (showSummary) View.VISIBLE else View.GONE
 
-        followActiveVisual = followActive
-        myLocationBtn.isEnabled = myLocationEnabled
-        myLocationBtn.alpha = if (myLocationEnabled) 1f else 0.45f
-        myLocationIcon.setImageResource(
-            if (followActive) {
-                R.drawable.ic_ds_my_location
-            } else {
-                R.drawable.ic_ds_location_searching
-            },
-        )
-        val tint = when {
-            !myLocationEnabled -> style.textSecondary
-            followActive -> style.primary
-            else -> style.textPrimary
+            refreshSpinner.visibility = if (refreshing) View.VISIBLE else View.GONE
+            refreshBtn.visibility = if (refreshing) View.GONE else View.VISIBLE
+
+            followActiveVisual = followActive
+            myLocationBtn.isEnabled = myLocationEnabled
+            myLocationBtn.alpha = if (myLocationEnabled) 1f else 0.45f
+            myLocationIcon.setImageResource(
+                if (followActive) {
+                    R.drawable.ic_ds_my_location
+                } else {
+                    R.drawable.ic_ds_location_searching
+                },
+            )
+            val tint = when {
+                !myLocationEnabled -> style.textSecondary
+                followActive -> style.primary
+                else -> style.textPrimary
+            }
+            myLocationIcon.setColorFilter(tint)
         }
-        myLocationIcon.setColorFilter(tint)
 
-        ensureHudWindowsVisible()
+        // Geometry only when windows are missing — never for identical text updates.
+        if (summaryPopup?.isShowing != true || locationPopup?.isShowing != true) {
+            ensureHudWindowsVisible()
+        }
     }
 
     private fun installSurfaceDemotionWatcher(root: ViewGroup) {

@@ -84,6 +84,13 @@ abstract class DeliveryMapController {
     void Function()? onRefresh,
     void Function()? onProviderMenu,
   }) {}
+
+  /// TMAP-only: hide/show PopupWindow HUD so Flutter menus are not covered.
+  /// Returns native dismiss/show acknowledgement map when supported.
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  /// TMAP-only: screen coords of provider button for device verification.
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
 }
 
 typedef DeliveryPinTapCallback = void Function(String markerId);

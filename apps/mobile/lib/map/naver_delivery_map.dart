@@ -76,6 +76,12 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
     void Function()? onProviderMenu,
   }) {}
 
+  @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
+
   void _onCameraChange(NCameraUpdateReason reason, bool animated) {
     if (_programmaticCameraMove) {
       if (reason != NCameraUpdateReason.location) {

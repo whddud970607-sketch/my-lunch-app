@@ -95,6 +95,12 @@ class _FakeMapController implements DeliveryMapController {
     void Function()? onRefresh,
     void Function()? onProviderMenu,
   }) {}
+
+  @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
 }
 
 Position _pos({
@@ -410,27 +416,24 @@ void main() {
       expect(coordinator.followEnabled, isTrue);
     });
 
-    test(
-      'D: resume + ready controller auto-resumes camera tracking',
-      () async {
-        await coordinator.startTracking();
-        await coordinator.onMyLocationPressed();
-        expect(coordinator.followEnabled, isTrue);
+    test('D: resume + ready controller auto-resumes camera tracking', () async {
+      await coordinator.startTracking();
+      await coordinator.onMyLocationPressed();
+      expect(coordinator.followEnabled, isTrue);
 
-        await coordinator.pauseTracking();
-        coordinator.detachMap();
-        map.cameraMoves.clear();
+      await coordinator.pauseTracking();
+      coordinator.detachMap();
+      map.cameraMoves.clear();
 
-        final next = _FakeMapController();
-        coordinator.attachMap(next);
-        await coordinator.startTracking();
-        await Future<void>.delayed(const Duration(milliseconds: 850));
+      final next = _FakeMapController();
+      coordinator.attachMap(next);
+      await coordinator.startTracking();
+      await Future<void>.delayed(const Duration(milliseconds: 850));
 
-        expect(coordinator.followEnabled, isTrue);
-        expect(next.cameraMoves, isNotEmpty);
-        expect(next.driverMarkers, isNotEmpty);
-      },
-    );
+      expect(coordinator.followEnabled, isTrue);
+      expect(next.cameraMoves, isNotEmpty);
+      expect(next.driverMarkers, isNotEmpty);
+    });
 
     test('E: temporary GPS stop preserves Follow ON', () async {
       await coordinator.startTracking();

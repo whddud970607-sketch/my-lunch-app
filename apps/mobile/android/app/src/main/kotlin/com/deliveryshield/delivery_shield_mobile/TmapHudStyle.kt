@@ -8,8 +8,8 @@ import android.util.TypedValue
 
 /**
  * Density-aware tokens mirroring Flutter Delivery Shield map HUD:
- * UnifiedMapOverlay, DsCard, MyLocationButton, AppSpacing / AppRadius /
- * AppTypography / AppColors.
+ * UnifiedMapOverlay, DsCard (Material Card defaults), MyLocationButton,
+ * AppSpacing / AppRadius / AppTypography / AppColors / AppTheme.cardTheme.
  */
 class TmapHudStyle(private val context: Context) {
     private val density = context.resources.displayMetrics.density
@@ -36,10 +36,14 @@ class TmapHudStyle(private val context: Context) {
     val textPrimary = Color.parseColor("#F8FAFC")
     val textSecondary = Color.parseColor("#94A3B8")
     val primary = Color.parseColor("#3B82F6")
+    val outline = Color.parseColor("#243044")
 
     // UnifiedMapOverlay outer padding (SafeArea + sm)
     val overlayMarginHorizontalDp = sm
     val overlayMarginTopDp = sm
+
+    // Material Card default margin (Flutter Card) = 4 on all sides
+    val cardMarginDp = 4f
 
     // DsCard padding LTRB: sm, sm, xs, sm
     val cardPaddingStartDp = sm
@@ -65,7 +69,10 @@ class TmapHudStyle(private val context: Context) {
     val locationMarginRightDp = md
     val locationMarginBottomDp = lg
 
-    val headerIconButtonSizeDp = 40f
+    // Flutter IconButton default min size 48, icon 24
+    val headerIconButtonSizeDp = 48f
+    val headerIconSizeDp = 24f
+    val headerIconPaddingDp = 12f
 
     private fun weight600(): Typeface {
         return if (Build.VERSION.SDK_INT >= 28) {

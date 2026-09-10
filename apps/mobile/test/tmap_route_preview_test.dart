@@ -86,6 +86,12 @@ class _RecordingMapController implements DeliveryMapController {
     void Function()? onRefresh,
     void Function()? onProviderMenu,
   }) {}
+
+  @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async => null;
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async => null;
 }
 
 bool _validCoord(double lat, double lng) {

@@ -368,6 +368,41 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
   }
 
   @override
+  Future<Map<String, dynamic>?> setHudPopupsVisible(bool visible) async {
+    final channel = _channel;
+    if (channel == null) return null;
+    try {
+      final raw = await channel.invokeMethod<dynamic>(
+        'setHudPopupsVisible',
+        <String, dynamic>{'visible': visible},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(raw);
+      }
+    } catch (e) {
+      debugPrint('tmap-map setHudPopupsVisible failed: $e');
+    }
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getProviderButtonScreenCoords() async {
+    final channel = _channel;
+    if (channel == null) return null;
+    try {
+      final raw = await channel.invokeMethod<dynamic>(
+        'getProviderButtonScreenCoords',
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(raw);
+      }
+    } catch (e) {
+      debugPrint('tmap-map getProviderButtonScreenCoords failed: $e');
+    }
+    return null;
+  }
+
+  @override
   Future<DeliveryLatLng?> getCenter() async {
     final channel = _channel;
     if (channel == null || !_mapReady) return null;
