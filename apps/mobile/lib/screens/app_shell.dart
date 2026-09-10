@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../config/app_info.dart';
+import '../debug/startup_timing.dart';
 import '../state/auth_controller.dart';
 import '../state/delivery_session_controller.dart';
 import '../widgets/lazy_indexed_tabs.dart';
@@ -41,6 +42,12 @@ class _AppShellState extends State<AppShell> {
   final ValueNotifier<int> _worksetRefreshTick = ValueNotifier(0);
 
   static const _tabCount = 5;
+
+  @override
+  void initState() {
+    super.initState();
+    StartupTiming.markSync('FIRST_INTERACTIVE_SCREEN', once: true);
+  }
 
   void _goToTab(int index) {
     setState(() {

@@ -2,11 +2,22 @@ package com.deliveryshield.delivery_shield_mobile
 
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(
+            DeliveryShieldApplication.PERF_TAG,
+            "mark=FLUTTER_ACTIVITY_CREATE elapsed_realtime_ms=${SystemClock.elapsedRealtime()}",
+        )
+        super.onCreate(savedInstanceState)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         flutterEngine
@@ -26,6 +37,12 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "primaryAbi" -> {
                     result.success(Build.SUPPORTED_ABIS.firstOrNull() ?: "")
+                }
+                "elapsedRealtimeMs" -> {
+                    result.success(SystemClock.elapsedRealtime())
+                }
+                "processStartElapsedMs" -> {
+                    result.success(DeliveryShieldApplication.processStartElapsedMs)
                 }
                 else -> result.notImplemented()
             }

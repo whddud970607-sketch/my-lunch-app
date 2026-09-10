@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../debug/startup_timing.dart';
 import '../models/me_response.dart';
 import '../services/api_client.dart';
 import '../services/api_exception.dart';
@@ -16,10 +17,10 @@ class AuthController extends ChangeNotifier {
     required ApiClient apiClient,
     required MeService meService,
     PermissionsStub? permissions,
-  })  : _auth = authService,
-        _api = apiClient,
-        _me = meService,
-        permissions = permissions ?? PermissionsStub();
+  }) : _auth = authService,
+       _api = apiClient,
+       _me = meService,
+       permissions = permissions ?? PermissionsStub();
 
   final AuthService _auth;
   final ApiClient _api;
@@ -60,6 +61,7 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> refreshMe() async {
+    await StartupTiming.mark('PROFILE_REQUEST_START');
     try {
       final profile = await _me.fetchMe();
       if (!profile.isDriver) {
@@ -67,6 +69,7 @@ class AuthController extends ChangeNotifier {
         me = null;
         state = AuthViewState.signedOut;
         errorMessage = 'Driver role required';
+        await StartupTiming.mark('PROFILE_READY');
         notifyListeners();
         return;
       }
@@ -75,6 +78,7 @@ class AuthController extends ChangeNotifier {
       errorMessage = null;
     } on ApiException catch (e) {
       if (e.unauthorized) {
+        await StartupTiming.mark('PROFILE_READY');
         await handleUnauthorized();
         return;
       }
@@ -84,6 +88,7 @@ class AuthController extends ChangeNotifier {
       state = AuthViewState.error;
       errorMessage = 'Failed to load profile';
     }
+    await StartupTiming.mark('PROFILE_READY');
     notifyListeners();
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../copy/driver_chrome_copy.dart';
 import '../config/device_abi.dart';
+import '../debug/startup_timing.dart';
 import '../map/delivery_location_pin.dart';
 import '../map/delivery_map_controller.dart';
 import '../map/delivery_map_surface.dart';
@@ -12,6 +13,7 @@ import '../map/map_host_policy.dart';
 import '../map/map_location_coordinator.dart';
 import '../map/map_provider_id.dart';
 import '../map/map_provider_settings.dart';
+import '../map/map_sdk_bootstrap.dart';
 import '../map/today_workset_map_adapter.dart';
 import '../map/workset_completion_reconciler.dart';
 import '../map/workset_map_filter.dart';
@@ -153,6 +155,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       session.addListener(_onDeliverySessionChanged);
     }
     debugPrint('[MAP] screen build');
+    StartupTiming.markSync('MAP_INIT_START', once: true);
     _bootstrap();
     _armNativeReadyTimeout();
   }
@@ -303,6 +306,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   }
 
   Future<void> _bootstrap() async {
+    await MapSdkBootstrap.ensureInitialized();
+    if (!mounted) return;
     unawaited(_load(isRefresh: false));
     final saved = await MapProviderSettings.load();
     if (!mounted || saved == _mapProviderId) return;
@@ -526,6 +531,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   void _onMapReady(DeliveryMapController controller) {
     debugPrint('[MAP] native ready');
+    StartupTiming.markSync('MAP_READY', once: true);
     _nativeReady = true;
     _nativeReadyRetries = 0;
     _nativeReadyTimeout?.cancel();

@@ -1,11 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 
 import 'config/app_config.dart';
-import 'config/device_abi.dart';
+import 'debug/startup_timing.dart';
 import 'location/driver_location_service.dart';
-import 'map/naver_map_bootstrap.dart';
-import 'map/naver_map_feature.dart';
+import 'map/map_sdk_bootstrap.dart';
 import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 import 'services/api_client.dart';
@@ -25,23 +25,20 @@ import 'sync/sync_scope.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await StartupTiming.markMainStart();
 
   try {
     await AppConfig.load();
-    final kakaoNativeOk = await DeviceAbi.isKakaoMapNativeSupported();
-    if (kakaoNativeOk) {
-      await KakaoMapsFlutter.init(AppConfig.instance.kakaoNativeAppKey);
-    }
-
-    registerNaverMapBootstrap();
-    await NaverMapFeature.tryInitialize();
+    await StartupTiming.mark('CONFIG_READY');
   } catch (e) {
     runApp(_BootErrorApp(message: e.toString()));
     return;
   }
 
   final auth = AuthService();
+  await StartupTiming.mark('SUPABASE_INIT_START');
   await auth.initialize();
+  await StartupTiming.mark('SUPABASE_READY');
 
   late final AuthController controller;
   final api = ApiClient(
@@ -51,11 +48,7 @@ Future<void> main() async {
     },
   );
   final me = MeService(api);
-  controller = AuthController(
-    authService: auth,
-    apiClient: api,
-    meService: me,
-  );
+  controller = AuthController(authService: auth, apiClient: api, meService: me);
 
   final locationService = DriverLocationService();
   final sessionService = DeliverySessionService(api);
@@ -94,16 +87,8 @@ Future<void> main() async {
     projections: projections,
   );
 
-  await controller.bootstrap();
-
-  if (controller.state == AuthViewState.signedIn) {
-    final driverId = controller.me?.driver?.id;
-    await sessionController.restoreOnBootstrap(driverId: driverId);
-    if (driverId != null && driverId.isNotEmpty) {
-      await syncEngine.bindDriver(driverId);
-    }
-  }
-
+  // PERF-S1: first frame before profile/session/map SDK work.
+  await StartupTiming.mark('RUN_APP');
   runApp(
     DeliveryShieldApp(
       controller: controller,
@@ -113,9 +98,19 @@ Future<void> main() async {
       completionEnqueue: completionEnqueue,
     ),
   );
+
+  // Map SDKs are not required for auth shell / home chrome.
+  unawaited(MapSdkBootstrap.ensureInitialized());
+
+  unawaited(() async {
+    await StartupTiming.mark('AUTH_STATE_START');
+    await controller.bootstrap();
+    await StartupTiming.mark('AUTH_STATE_READY');
+    // Session restore runs in AuthGate after signedIn (avoids blocking shell).
+  }());
 }
 
-class DeliveryShieldApp extends StatelessWidget {
+class DeliveryShieldApp extends StatefulWidget {
   const DeliveryShieldApp({
     super.key,
     required this.controller,
@@ -132,19 +127,32 @@ class DeliveryShieldApp extends StatelessWidget {
   final CompletionEnqueueService completionEnqueue;
 
   @override
+  State<DeliveryShieldApp> createState() => _DeliveryShieldAppState();
+}
+
+class _DeliveryShieldAppState extends State<DeliveryShieldApp> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      StartupTiming.markSync('FIRST_FLUTTER_FRAME', once: true);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SyncScope(
-      syncEngine: syncEngine,
-      projections: projections,
-      completionEnqueue: completionEnqueue,
+      syncEngine: widget.syncEngine,
+      projections: widget.projections,
+      completionEnqueue: widget.completionEnqueue,
       child: MaterialApp(
         title: 'Delivery Shield',
         theme: AppTheme.dark(),
         home: AuthGate(
-          controller: controller,
-          sessionController: sessionController,
-          syncEngine: syncEngine,
-          projections: projections,
+          controller: widget.controller,
+          sessionController: widget.sessionController,
+          syncEngine: widget.syncEngine,
+          projections: widget.projections,
         ),
       ),
     );
@@ -164,10 +172,7 @@ class _BootErrorApp extends StatelessWidget {
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-            ),
+            child: Text(message, textAlign: TextAlign.center),
           ),
         ),
       ),

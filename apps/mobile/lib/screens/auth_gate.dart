@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../debug/startup_timing.dart';
 import '../state/auth_controller.dart';
 import '../state/delivery_session_controller.dart';
 import '../sync/completion_projection_store.dart';
@@ -54,6 +55,8 @@ class _AuthGateState extends State<AuthGate> {
     if (state == AuthViewState.signedIn &&
         driverId != null &&
         driverId.isNotEmpty) {
+      StartupTiming.markSync('APP_SHELL_VISIBLE', once: true);
+      StartupTiming.markSync('FIRST_INTERACTIVE_SCREEN', once: true);
       if (_boundDriverId == driverId &&
           widget.syncEngine.boundDriverId == driverId) {
         return;
@@ -64,7 +67,9 @@ class _AuthGateState extends State<AuthGate> {
       }
       await widget.syncEngine.bindDriver(driverId);
       _boundDriverId = driverId;
+      await StartupTiming.mark('SESSION_RESTORE_START');
       await widget.sessionController.restoreOnBootstrap(driverId: driverId);
+      await StartupTiming.mark('SESSION_RESTORE_END');
       return;
     }
 
