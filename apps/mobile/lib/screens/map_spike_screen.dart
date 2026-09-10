@@ -123,6 +123,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   bool _tickerOn = true;
   bool _nativeReady = false;
   int _nativeReadyRetries = 0;
+
   /// True while TMAP in-app Navi Activity is expected to be on top.
   bool _tmapInAppNaviActive = false;
   Timer? _nativeReadyTimeout;
@@ -146,6 +147,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   @override
   void initState() {
     super.initState();
+    // ignore: avoid_print — release logcat P0 verification
+    print('DS_MAP_MOUNT');
     WidgetsBinding.instance.addObserver(this);
     _locationCoordinator.addListener(_onLocationCoordinatorChanged);
     widget.refreshTick?.addListener(_onExternalRefresh);
@@ -310,18 +313,25 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (!mounted) return;
     unawaited(_load(isRefresh: false));
     final saved = await MapProviderSettings.load();
-    if (!mounted || saved == _mapProviderId) return;
-    setState(() {
-      _mapProviderId = saved;
-      _mapController = null;
-      _nativeReady = false;
-      _mapHostGeneration++;
-    });
-    _armNativeReadyTimeout();
+    if (!mounted) return;
+    if (saved != _mapProviderId) {
+      setState(() {
+        _mapProviderId = saved;
+        _mapController = null;
+        _nativeReady = false;
+        _mapHostGeneration++;
+      });
+      _armNativeReadyTimeout();
+    }
+    // P0 ephemeral map tab: restore logical Follow after PlatformView remount.
+    await _locationCoordinator.loadVehicleType();
+    await _locationCoordinator.hydrateFollowFromPersistence();
   }
 
   @override
   void dispose() {
+    // ignore: avoid_print — release logcat P0 PlatformView detach verification
+    print('DS_MAP_DISPOSE');
     if (_projections != null && _projectionListenerAttached) {
       _projections!.removeListener(_onProjectionsChanged);
     }
@@ -537,6 +547,14 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     _nativeReadyTimeout?.cancel();
     _mapController = controller;
     _locationCoordinator.attachMap(controller);
+    controller.setMyLocationButtonListener(
+      () => _locationCoordinator.onMyLocationPressed(),
+    );
+    controller.setHudActionListener(
+      onRefresh: () => _load(isRefresh: true),
+      onProviderMenu: _showTmapProviderPicker,
+    );
+    _pushTmapNativeHud();
     unawaited(_syncPinsToMap());
     final focusId = widget.focusPointId ?? _pendingFocusPointId;
     if (focusId == null || focusId.isEmpty) {
@@ -544,6 +562,55 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       return;
     }
     _applyFocusPoint(focusId);
+  }
+
+  void _pushTmapNativeHud() {
+    if (_mapProviderId != MapProviderId.tmap) return;
+    final controller = _mapController;
+    if (controller == null) return;
+    final today = _effectiveSource == DeliveryMapDataSource.today;
+    final summary = _workset?.summary;
+    // Match Flutter UnifiedMapOverlay gating (empty workset still shows 0/0/0).
+    final showSummary = today && _workset != null && !_loading;
+    unawaited(
+      controller.setShieldHudPresentation(
+        title: _mapTitle,
+        showSummary: showSummary,
+        totalPoints: summary?.totalPoints ?? 0,
+        completedPoints: summary?.completedPoints ?? 0,
+        remainingPoints: summary?.remainingPoints ?? 0,
+        followActive: _locationCoordinator.followEnabled,
+        myLocationEnabled: !_locationCoordinator.permissionDenied,
+        refreshing: _refreshing,
+      ),
+    );
+  }
+
+  void _showTmapProviderPicker() {
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final id in MapProviderId.values)
+                ListTile(
+                  title: Text(id.displayLabel),
+                  trailing: id == _mapProviderId
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _changeMapProvider(id);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _applyFocusPoint(String focusId) {
@@ -736,9 +803,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         _tmapInAppNaviActive = false;
         _locationCoordinator.setCameraFollowSuppressed(false);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('티맵 길찾기를 열 수 없습니다')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('티맵 길찾기를 열 수 없습니다')));
         }
       }
       return;
@@ -972,15 +1038,28 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     DeliveryMapDataSource.singleSpike => '배송 지도 (Spike)',
   };
 
-  UnifiedMapOverlay _overlay({required bool stale}) {
+  Widget _overlay({required bool stale}) {
     final today = _effectiveSource == DeliveryMapDataSource.today;
     final summary = _workset?.summary;
-    return UnifiedMapOverlay(
+    final total = summary?.totalPoints ?? 0;
+    final completed = summary?.completedPoints ?? 0;
+    final remaining = summary?.remainingPoints ?? 0;
+    // Empty workset: still show 전체0/완료0/남음0 once load completes.
+    // Match delivery list: workset != null && !loading (not points.isNotEmpty).
+    final showSummary = today && _workset != null && !_loading;
+    // ignore: avoid_print — release parity verification (counts only, no PII)
+    print(
+      'DS_MAP_OVERLAY provider=${_mapProviderId.name} '
+      'showSummary=$showSummary '
+      'total=$total completed=$completed remaining=$remaining '
+      'follow=${_locationCoordinator.followEnabled}',
+    );
+    final overlay = UnifiedMapOverlay(
       title: _mapTitle,
-      showSummary: today && _workset != null,
-      totalPoints: summary?.totalPoints ?? 0,
-      completedPoints: summary?.completedPoints ?? 0,
-      remainingPoints: summary?.remainingPoints ?? 0,
+      showSummary: showSummary,
+      totalPoints: total,
+      completedPoints: completed,
+      remainingPoints: remaining,
       filters: today ? WorksetMapFilterChips.fromWorkset(_workset) : const [],
       selectedFilter: _filter,
       onFilterSelected: today ? _setFilter : null,
@@ -992,6 +1071,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       onBack: () => Navigator.of(context).maybePop(),
       stale: stale,
     );
+    return overlay;
   }
 
   @override
@@ -1008,6 +1088,12 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         const DeliveryLatLng(latitude: 37.5665, longitude: 126.9780);
     final showLoading = _loading && _pointsById.isEmpty;
     final showError = _error != null && _pointsById.isEmpty;
+    final isTmap = _mapProviderId == MapProviderId.tmap;
+    if (isTmap) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pushTmapNativeHud();
+      });
+    }
 
     return Stack(
       fit: StackFit.expand,
@@ -1043,42 +1129,58 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
             },
           ),
         ),
-        overlay,
+        // Kakao/Naver: Flutter HUD sibling. TMAP uses native HUD in PlatformView.
+        if (!isTmap)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Material(
+              type: MaterialType.transparency,
+              elevation: 24,
+              child: overlay,
+            ),
+          ),
         if (showLoading) const MapLoadingPanel(),
         if (showError)
           MapErrorPanel(
             message: _error!,
             onRetry: () => _load(isRefresh: false),
           ),
-        ValueListenableBuilder<bool>(
-          valueListenable: _pinAdjustMode,
-          builder: (context, adjusting, _) {
-            if (adjusting || _detailOpen) return const SizedBox.shrink();
-            return ValueListenableBuilder<String?>(
-              valueListenable: _selectedMarkerId,
-              builder: (context, selectedId, _) {
-                return Align(
-                  alignment: Alignment.bottomRight,
-                  child: SafeArea(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        right: AppSpacing.md,
-                        bottom: selectedId != null ? 176 : AppSpacing.lg,
-                      ),
-                      child: MyLocationButton(
-                        key: UnifiedMapKeys.currentLocation,
-                        followActive: _locationCoordinator.followEnabled,
-                        enabled: !_locationCoordinator.permissionDenied,
-                        onPressed: () =>
-                            _locationCoordinator.onMyLocationPressed(),
+        if (!isTmap)
+          ValueListenableBuilder<bool>(
+            valueListenable: _pinAdjustMode,
+            builder: (context, adjusting, _) {
+              if (adjusting || _detailOpen) return const SizedBox.shrink();
+              return ValueListenableBuilder<String?>(
+                valueListenable: _selectedMarkerId,
+                builder: (context, selectedId, _) {
+                  return Align(
+                    alignment: Alignment.bottomRight,
+                    child: SafeArea(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          right: AppSpacing.md,
+                          bottom: selectedId != null ? 176 : AppSpacing.lg,
+                        ),
+                        child: Material(
+                          type: MaterialType.transparency,
+                          elevation: 24,
+                          child: MyLocationButton(
+                            key: UnifiedMapKeys.currentLocation,
+                            followActive: _locationCoordinator.followEnabled,
+                            enabled: !_locationCoordinator.permissionDenied,
+                            onPressed: () =>
+                                _locationCoordinator.onMyLocationPressed(),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
+                  );
+                },
+              );
+            },
+          ),
         ValueListenableBuilder<bool>(
           valueListenable: _pinAdjustMode,
           builder: (context, adjusting, _) {

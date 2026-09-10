@@ -9,6 +9,7 @@ import '../location/driver_location_snapshot.dart';
 import '../location/driver_vehicle_settings.dart';
 import '../location/driver_vehicle_type.dart';
 import 'delivery_map_controller.dart';
+import 'map_follow_settings.dart';
 
 /// Bridges [DriverLocationService] and map SDK driver-marker APIs.
 ///
@@ -137,6 +138,7 @@ class MapLocationCoordinator extends ChangeNotifier {
     _lastMarkerState = null;
     _followEnabled = false;
     _cameraFollowSuppressed = false;
+    _persistFollow(false);
     notifyListeners();
   }
 
@@ -150,6 +152,31 @@ class MapLocationCoordinator extends ChangeNotifier {
 
   void bindPositionStream() {
     _positionSub ??= _locationService.positions.listen(_onPosition);
+  }
+
+  /// Restore logical Follow after MapSpikeScreen remount (P0 ephemeral map).
+  ///
+  /// Does not require a user gesture. Camera resumes when [attachMap] runs.
+  Future<void> hydrateFollowFromPersistence() async {
+    final shouldFollow = await MapFollowSettings.load();
+    if (!shouldFollow) return;
+    _followEnabled = true;
+    notifyListeners();
+    debugPrint('[FOLLOW] hydrated logical Follow ON from persistence');
+    // Restart GPS if needed — must not clear Follow on temporary failure.
+    if (!_locationService.isTracking) {
+      await startTracking();
+    }
+  }
+
+  void _persistFollow(bool enabled) {
+    unawaited(() async {
+      try {
+        await MapFollowSettings.save(enabled);
+      } catch (_) {
+        // Tests / early boot without prefs plugin — logical Follow still valid.
+      }
+    }());
   }
 
   void _onPosition(DriverLocationSnapshot snapshot) {
@@ -177,6 +204,7 @@ class MapLocationCoordinator extends ChangeNotifier {
       if (!ok) {
         _permissionDenied = true;
         _followEnabled = false;
+        _persistFollow(false);
         notifyListeners();
         return;
       }
@@ -184,6 +212,7 @@ class MapLocationCoordinator extends ChangeNotifier {
     }
 
     _followEnabled = true;
+    _persistFollow(true);
     notifyListeners();
 
     final snapshot = _locationService.lastSnapshot;
@@ -219,6 +248,7 @@ class MapLocationCoordinator extends ChangeNotifier {
     _followEnabled = false;
     _cameraFollowSuppressed = false;
     _cameraFollowGeneration++;
+    _persistFollow(false);
     notifyListeners();
   }
 

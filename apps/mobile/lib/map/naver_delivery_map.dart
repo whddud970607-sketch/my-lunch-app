@@ -9,6 +9,7 @@ import 'delivery_location_pin.dart';
 import 'delivery_map_controller.dart';
 import 'naver_map_feature.dart';
 import 'quantity_pin_icon.dart';
+
 /// Naver Maps SDK host — same DeliveryPoint coords / quantity pins as Kakao.
 class NaverDeliveryMap extends StatefulWidget {
   const NaverDeliveryMap({
@@ -53,6 +54,27 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
   void setUserGestureListener(void Function()? onUserGesture) {
     _onUserGesture = onUserGesture;
   }
+
+  @override
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {}
+
+  @override
+  void setMyLocationButtonListener(void Function()? onPressed) {}
+
+  @override
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {}
 
   void _onCameraChange(NCameraUpdateReason reason, bool animated) {
     if (_programmaticCameraMove) {
@@ -389,7 +411,10 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
     return NaverMap(
       key: ValueKey('delivery-naver-map-$hashCode'),
       options: NaverMapViewOptions(
-        initialCameraPosition: NCameraPosition(target: target, zoom: initialZoom),
+        initialCameraPosition: NCameraPosition(
+          target: target,
+          zoom: initialZoom,
+        ),
         locale: const Locale('ko'),
       ),
       onMapReady: _onMapReady,
@@ -399,10 +424,7 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
 }
 
 class _NaverUnavailablePanel extends StatelessWidget {
-  const _NaverUnavailablePanel({
-    required this.title,
-    required this.message,
-  });
+  const _NaverUnavailablePanel({required this.title, required this.message});
 
   final String title;
   final String message;

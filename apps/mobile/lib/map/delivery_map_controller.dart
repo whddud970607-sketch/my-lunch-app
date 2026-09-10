@@ -61,7 +61,32 @@ abstract class DeliveryMapController {
   /// Optional user-gesture hook. Follow Mode must NOT disable on pan/zoom;
   /// only delivery-session end turns Follow OFF.
   void setUserGestureListener(void Function()? onUserGesture);
+
+  /// TMAP-only: push HUD presentation into the native view hierarchy above
+  /// [TMapView] so SurfaceView Z-order cannot hide Delivery Shield chrome.
+  /// Kakao/Naver keep the default no-op (Flutter [UnifiedMapOverlay]).
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {}
+
+  /// TMAP-only: Flutter listens via map channel; default unused.
+  void setMyLocationButtonListener(void Function()? onPressed) {}
+
+  /// TMAP-only: refresh / provider chrome from native HUD.
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {}
 }
 
 typedef DeliveryPinTapCallback = void Function(String markerId);
-typedef DeliveryMapReadyCallback = void Function(DeliveryMapController controller);
+typedef DeliveryMapReadyCallback = void Function(
+  DeliveryMapController controller,
+);

@@ -9,6 +9,7 @@ import 'package:delivery_shield_mobile/map/delivery_location_pin.dart';
 import 'package:delivery_shield_mobile/map/map_location_coordinator.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeMapController implements DeliveryMapController {
   final cameraMoves = <DeliveryLatLng>[];
@@ -73,6 +74,27 @@ class _FakeMapController implements DeliveryMapController {
   void setUserGestureListener(void Function()? onUserGesture) {
     userGesture = onUserGesture;
   }
+
+  @override
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {}
+
+  @override
+  void setMyLocationButtonListener(void Function()? onPressed) {}
+
+  @override
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {}
 }
 
 Position _pos({
@@ -98,6 +120,9 @@ Position _pos({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
 
   group('DriverLocationService low-latency config', () {
     test('uses navigation accuracy and 1m / 1s Android settings', () {

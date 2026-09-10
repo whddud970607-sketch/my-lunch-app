@@ -65,6 +65,27 @@ class _RecordingMapController implements DeliveryMapController {
 
   @override
   void setUserGestureListener(void Function()? onUserGesture) {}
+
+  @override
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {}
+
+  @override
+  void setMyLocationButtonListener(void Function()? onPressed) {}
+
+  @override
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {}
 }
 
 bool _validCoord(double lat, double lng) {

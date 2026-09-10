@@ -3,7 +3,9 @@ import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
@@ -65,6 +67,9 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
   List<DeliveryLocationPin> _pins = const [];
   DriverLocationMarkerState? _pendingDriver;
   void Function()? _onUserGesture;
+  void Function()? _onMyLocationPressed;
+  void Function()? _onRefreshPressed;
+  void Function()? _onProviderMenuPressed;
   bool _programmaticCameraMove = false;
   late DriverMarkerInterpolator _driverInterp;
   DriverLocationMarkerState? _driverTruth;
@@ -211,6 +216,15 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
         // Follow must NOT turn OFF on gesture (locked product policy).
         _onUserGesture?.call();
         break;
+      case 'onMyLocationPressed':
+        _onMyLocationPressed?.call();
+        break;
+      case 'onRefreshPressed':
+        _onRefreshPressed?.call();
+        break;
+      case 'onProviderMenuPressed':
+        _onProviderMenuPressed?.call();
+        break;
       case 'onRoutePreviewResult':
         // Flutter keeps selection/Follow; native owns geometry. Log only.
         if (kDebugMode) {
@@ -314,6 +328,43 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
   @override
   void setUserGestureListener(void Function()? onUserGesture) {
     _onUserGesture = onUserGesture;
+  }
+
+  @override
+  void setMyLocationButtonListener(void Function()? onPressed) {
+    _onMyLocationPressed = onPressed;
+  }
+
+  @override
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {
+    _onRefreshPressed = onRefresh;
+    _onProviderMenuPressed = onProviderMenu;
+  }
+
+  @override
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {
+    await _invoke('setShieldHud', <String, dynamic>{
+      'title': title,
+      'showSummary': showSummary,
+      'totalPoints': totalPoints,
+      'completedPoints': completedPoints,
+      'remainingPoints': remainingPoints,
+      'followActive': followActive,
+      'myLocationEnabled': myLocationEnabled,
+      'refreshing': refreshing,
+    });
   }
 
   @override
@@ -560,12 +611,33 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
       fit: StackFit.expand,
       children: [
         if (TmapMapFeature.isConfigured && Platform.isAndroid)
-          AndroidView(
+          // Hybrid Composition so MapSpikeScreen Flutter HUD (counts / Follow /
+          // detail) paints ABOVE TMapView — VirtualDisplay AndroidView hid it.
+          PlatformViewLink(
             viewType: _viewType,
-            layoutDirection: TextDirection.ltr,
-            creationParams: _creationParams,
-            creationParamsCodec: const StandardMessageCodec(),
-            onPlatformViewCreated: _onPlatformViewCreated,
+            surfaceFactory: (context, controller) {
+              return AndroidViewSurface(
+                controller: controller as AndroidViewController,
+                gestureRecognizers:
+                    const <Factory<OneSequenceGestureRecognizer>>{},
+                hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+              );
+            },
+            onCreatePlatformView: (params) {
+              final view = PlatformViewsService.initSurfaceAndroidView(
+                id: params.id,
+                viewType: _viewType,
+                layoutDirection: TextDirection.ltr,
+                creationParams: _creationParams,
+                creationParamsCodec: const StandardMessageCodec(),
+                onFocus: () => params.onFocusChanged(true),
+              );
+              view
+                ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
+                ..addOnPlatformViewCreatedListener(_onPlatformViewCreated)
+                ..create();
+              return view;
+            },
           ),
         if (_uiState == _TmapMapUiState.creating ||
             _uiState == _TmapMapUiState.authPending)

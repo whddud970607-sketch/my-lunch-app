@@ -38,6 +38,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   bool _markersPlaced = false;
   bool _driverLayerReady = false;
   bool _programmaticCameraMove = false;
+
   /// After pin styles settle — concurrent registerMarkerStyles crashes Kakao GL
   /// (SIGSEGV LabelPerLevelStyle / MapLabelManager.addStyle).
   bool _labelStyleSurfaceReady = false;
@@ -84,6 +85,27 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   void setUserGestureListener(void Function()? onUserGesture) {
     _onUserGesture = onUserGesture;
   }
+
+  @override
+  Future<void> setShieldHudPresentation({
+    required String title,
+    required bool showSummary,
+    required int totalPoints,
+    required int completedPoints,
+    required int remainingPoints,
+    required bool followActive,
+    required bool myLocationEnabled,
+    bool refreshing = false,
+  }) async {}
+
+  @override
+  void setMyLocationButtonListener(void Function()? onPressed) {}
+
+  @override
+  void setHudActionListener({
+    void Function()? onRefresh,
+    void Function()? onProviderMenu,
+  }) {}
 
   Future<void> _onMapCreated(KakaoMapController controller) async {
     if (_host.disposed) return;
@@ -164,9 +186,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
       styles.add(
         MarkerStyle(
           styleId: styleId,
-          perLevels: [
-            MarkerPerLevelStyle.fromBytes(bytes: bytes, level: 0),
-          ],
+          perLevels: [MarkerPerLevelStyle.fromBytes(bytes: bytes, level: 0)],
         ),
       );
     }
@@ -218,10 +238,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
           .map(
             (pin) => MarkerOption(
               id: pin.markerId,
-              latLng: LatLng(
-                latitude: pin.latitude,
-                longitude: pin.longitude,
-              ),
+              latLng: LatLng(latitude: pin.latitude, longitude: pin.longitude),
               styleId: QuantityPinIconFactory.styleIdForQuantity(
                 pin.totalQuantity,
                 status: pin.visualStatus,
@@ -398,10 +415,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     await controller.addMarker(
       markerOption: MarkerOption(
         id: DriverLocationMarkerIds.markerId,
-        latLng: LatLng(
-          latitude: state.latitude,
-          longitude: state.longitude,
-        ),
+        latLng: LatLng(latitude: state.latitude, longitude: state.longitude),
         styleId: styleId,
         rank: 2000,
       ),
@@ -532,8 +546,8 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
     if (zoom != null) {
       zoomLevel = zoom.round();
     } else if (followUpdate) {
-      zoomLevel = await controller.getZoomLevel() ??
-          (widget.pins.length > 1 ? 14 : 17);
+      zoomLevel =
+          await controller.getZoomLevel() ?? (widget.pins.length > 1 ? 14 : 17);
     } else {
       zoomLevel = widget.pins.length > 1 ? 14 : 17;
     }
@@ -555,6 +569,7 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
       ),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     debugPrint('[MAP] kakao widget created');

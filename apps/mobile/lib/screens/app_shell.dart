@@ -168,6 +168,9 @@ class _AppShellState extends State<AppShell> {
       body: LazyIndexedTabs(
         index: _index,
         itemCount: _tabCount,
+        // P0: Android map PlatformViews must leave the tree when map is not
+        // selected — IndexedStack offstage keeps them composited above siblings.
+        keepAliveForIndex: (i) => i != AppShellTabs.map,
         itemBuilder: _tabAt,
       ),
       bottomNavigationBar: NavigationBar(

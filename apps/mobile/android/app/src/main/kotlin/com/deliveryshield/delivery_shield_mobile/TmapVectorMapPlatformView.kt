@@ -4,10 +4,28 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.PointF
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.skt.tmap.TMapData
@@ -44,6 +62,30 @@ class TmapVectorMapPlatformView(
     )
     private val container = FrameLayout(context)
     private val mapView: TMapView = TMapView(context)
+    /**
+     * Delivery Shield HUD presentation.
+     *
+     * Same-window siblings of an on-top [SurfaceView] are covered. Presentation
+     * therefore uses [PopupWindow] (separate window above SurfaceView). Flutter
+     * remains source of truth; this only mirrors presentation + input.
+     */
+    private var summaryPopup: PopupWindow? = null
+    private var locationPopup: PopupWindow? = null
+    private lateinit var style: TmapHudStyle
+    private lateinit var summaryRoot: LinearLayout
+    private lateinit var hudCard: LinearLayout
+    private lateinit var hudTitle: TextView
+    private lateinit var hudTotal: TextView
+    private lateinit var hudCompleted: TextView
+    private lateinit var hudRemaining: TextView
+    private lateinit var hudSummaryRow: LinearLayout
+    private lateinit var refreshBtn: ImageButton
+    private lateinit var layersBtn: ImageButton
+    private lateinit var refreshSpinner: ProgressBar
+    private lateinit var myLocationBtn: FrameLayout
+    private lateinit var myLocationIcon: ImageView
+    private var hudLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var followActiveVisual = false
 
     private var disposed = false
     private var mapReadyEmitted = false
@@ -81,7 +123,12 @@ class TmapVectorMapPlatformView(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT,
         )
+        // Demote SurfaceView as soon as VSM adds it — ideally before surface attach.
+        installSurfaceDemotionWatcher(mapView)
+        installSurfaceDemotionWatcher(container)
         container.addView(mapView)
+        buildHudWidgets(context)
+        wireHudLayoutTracking()
         wireInteractionListeners()
 
         val apiKey = (creationParams?.get("apiKey") as? String)?.trim().orEmpty()
@@ -128,6 +175,14 @@ class TmapVectorMapPlatformView(
                             return
                         }
                         applyPendingState()
+                        demoteSurfaceViews(reason = "onMapReady")
+                        ensureHudWindowsVisible()
+                        container.post {
+                            if (!disposed) {
+                                demoteSurfaceViews(reason = "onMapReady_post")
+                                ensureHudWindowsVisible()
+                            }
+                        }
                         Log.i(tag, "state=MAP_READY")
                         emit("onMapReady", emptyMap())
                     }
@@ -171,6 +226,12 @@ class TmapVectorMapPlatformView(
         pendingRoutePolylinePoints = null
         pendingCarRoutePreview = null
         Log.i(tag, "state=DISPOSED")
+        dismissHudWindows()
+        val listener = hudLayoutListener
+        if (listener != null) {
+            container.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+            hudLayoutListener = null
+        }
         (activity as? LifecycleOwner)?.lifecycle?.removeObserver(this)
         channel.setMethodCallHandler(null)
         try {
@@ -292,6 +353,14 @@ class TmapVectorMapPlatformView(
                 }
                 runOnUi {
                     removeDriverInternal()
+                    result.success(null)
+                }
+            }
+            "setShieldHud" -> {
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as? Map<String, Any?>
+                runOnUi {
+                    applyShieldHud(args)
                     result.success(null)
                 }
             }
@@ -626,6 +695,14 @@ class TmapVectorMapPlatformView(
             }
             driverPresent = true
             mapView.bringMarkerToFront(marker)
+            val attached = mapView.getMarkerItemFromId(DRIVER_MARKER_ID) != null
+            Log.i(
+                tag,
+                "TMAP_DRIVER_MARKER_CREATED=YES " +
+                    "TMAP_DRIVER_MARKER_ATTACHED=${if (attached) "YES" else "NO"} " +
+                    "TMAP_DRIVER_MARKER_VISIBLE=YES " +
+                    "GPS_POSITION_AVAILABLE=YES",
+            )
         } catch (t: Throwable) {
             Log.w(tag, "upsertDriverInternal failed", t)
         }
@@ -815,6 +892,7 @@ class TmapVectorMapPlatformView(
             mapView.onResume()
             resumed = true
             Log.d(tag, "lifecycle=onResume")
+            ensureHudWindowsVisible()
         } catch (t: Throwable) {
             Log.e(tag, "lifecycle=onResume failed", t)
         }
@@ -823,6 +901,7 @@ class TmapVectorMapPlatformView(
     private fun pauseMap() {
         if (disposed || !resumed) return
         try {
+            // Keep HUD windows; map pause only. Dismiss happens on PlatformView dispose.
             mapView.onPause()
             resumed = false
             Log.d(tag, "lifecycle=onPause")
@@ -894,6 +973,331 @@ class TmapVectorMapPlatformView(
             "quantity" to raw["quantity"],
             "visualStatus" to raw["visualStatus"],
         )
+    }
+
+    /**
+     * Builds HUD widgets hosted in [PopupWindow]s so they sit above VSM's
+     * on-top [SurfaceView]. Visual tokens match Flutter UnifiedMapOverlay /
+     * MyLocationButton via [TmapHudStyle].
+     */
+    private fun buildHudWidgets(context: Context) {
+        style = TmapHudStyle(context)
+
+        summaryRoot = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+
+        hudCard = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = style.dp(style.cardCornerRadiusDp).toFloat()
+                setColor(style.surfaceElevated)
+            }
+            elevation = style.dp(style.cardElevationDp).toFloat()
+            setPadding(
+                style.dp(style.cardPaddingStartDp),
+                style.dp(style.cardPaddingTopDp),
+                style.dp(style.cardPaddingEndDp),
+                style.dp(style.cardPaddingBottomDp),
+            )
+        }
+
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        hudTitle = TextView(context).apply {
+            text = TmapHudStyle.DEFAULT_TITLE
+            setTextColor(style.textPrimary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.titleTextSp)
+            typeface = style.titleTypeface
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+        }
+        header.addView(hudTitle)
+
+        val iconBtnSize = style.dp(style.headerIconButtonSizeDp)
+        refreshSpinner = ProgressBar(context).apply {
+            layoutParams = LinearLayout.LayoutParams(style.dp(18f), style.dp(18f)).apply {
+                marginStart = style.dp(style.sm)
+                marginEnd = style.dp(style.sm)
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            visibility = View.GONE
+            isIndeterminate = true
+        }
+        header.addView(refreshSpinner)
+
+        refreshBtn = ImageButton(context).apply {
+            layoutParams = LinearLayout.LayoutParams(iconBtnSize, iconBtnSize)
+            setBackgroundColor(Color.TRANSPARENT)
+            setImageResource(R.drawable.ic_ds_refresh)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            contentDescription = "새로고침"
+            setOnClickListener { emit("onRefreshPressed", emptyMap()) }
+        }
+        header.addView(refreshBtn)
+
+        layersBtn = ImageButton(context).apply {
+            layoutParams = LinearLayout.LayoutParams(iconBtnSize, iconBtnSize)
+            setBackgroundColor(Color.TRANSPARENT)
+            setImageResource(R.drawable.ic_ds_layers)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            contentDescription = "지도 제공자"
+            setOnClickListener { emit("onProviderMenuPressed", emptyMap()) }
+        }
+        header.addView(layersBtn)
+
+        hudCard.addView(header)
+
+        hudSummaryRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, style.dp(style.summaryGapAfterTitleDp), 0, 0)
+            visibility = View.GONE
+        }
+        fun makeStat(initial: String): TextView = TextView(context).apply {
+            text = initial
+            setTextColor(style.textSecondary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.countTextSp)
+            typeface = style.countTypeface
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            )
+        }
+        hudTotal = makeStat("전체 0")
+        hudCompleted = makeStat("완료 0")
+        hudRemaining = makeStat("남음 0")
+        hudSummaryRow.addView(hudTotal)
+        hudSummaryRow.addView(hudCompleted)
+        hudSummaryRow.addView(hudRemaining)
+        hudCard.addView(hudSummaryRow)
+
+        summaryRoot.addView(
+            hudCard,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+
+        val btnSize = style.dp(style.locationButtonSizeDp)
+        myLocationIcon = ImageView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                style.dp(style.locationIconSizeDp),
+                style.dp(style.locationIconSizeDp),
+                Gravity.CENTER,
+            )
+            setImageResource(R.drawable.ic_ds_location_searching)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        myLocationBtn = FrameLayout(context).apply {
+            layoutParams = ViewGroup.LayoutParams(btnSize, btnSize)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = style.dp(style.locationCornerRadiusDp).toFloat()
+                setColor(style.surfaceElevated)
+            }
+            elevation = style.dp(style.locationElevationDp).toFloat()
+            isClickable = true
+            isFocusable = true
+            contentDescription = "내 위치"
+            setOnClickListener { emit("onMyLocationPressed", emptyMap()) }
+            addView(myLocationIcon)
+        }
+    }
+
+    private fun wireHudLayoutTracking() {
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            if (disposed) return@OnGlobalLayoutListener
+            if (container.width <= 0 || container.height <= 0) return@OnGlobalLayoutListener
+            ensureHudWindowsVisible()
+        }
+        hudLayoutListener = listener
+        container.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    private fun ensureHudWindowsVisible() {
+        if (disposed) return
+        if (!container.isAttachedToWindow) return
+        if (container.width <= 0 || container.height <= 0) return
+        if (!::style.isInitialized) return
+
+        val loc = IntArray(2)
+        container.getLocationInWindow(loc)
+        val insets = ViewCompat.getRootWindowInsets(container)
+        val statusTop = insets?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+        val safeTopExtra = if (loc[1] < statusTop) (statusTop - loc[1]) else 0
+        val topPad = safeTopExtra + style.dp(style.overlayMarginTopDp)
+        val sidePad = style.dp(style.overlayMarginHorizontalDp)
+        val summaryWidth = (container.width - sidePad * 2).coerceAtLeast(style.dp(200f))
+
+        if (summaryPopup == null) {
+            summaryPopup = PopupWindow(
+                summaryRoot,
+                summaryWidth,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                false,
+            ).apply {
+                isOutsideTouchable = false
+                isFocusable = false
+                isTouchable = true
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                elevation = style.dp(8f).toFloat()
+                if (Build.VERSION.SDK_INT >= 29) {
+                    isTouchModal = false
+                }
+            }
+        } else {
+            summaryPopup?.width = summaryWidth
+        }
+
+        val btnSize = style.dp(style.locationButtonSizeDp)
+        if (locationPopup == null) {
+            locationPopup = PopupWindow(
+                myLocationBtn,
+                btnSize,
+                btnSize,
+                false,
+            ).apply {
+                isOutsideTouchable = false
+                isFocusable = false
+                isTouchable = true
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                elevation = style.dp(style.locationElevationDp).toFloat()
+                if (Build.VERSION.SDK_INT >= 29) {
+                    isTouchModal = false
+                }
+            }
+        }
+
+        try {
+            val summary = summaryPopup!!
+            val x = loc[0] + sidePad
+            val y = loc[1] + topPad
+            if (summary.isShowing) {
+                summary.update(x, y, summaryWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true)
+            } else {
+                summary.showAtLocation(container, Gravity.NO_GRAVITY, x, y)
+            }
+
+            val location = locationPopup!!
+            val lx = loc[0] + container.width - btnSize -
+                style.dp(style.locationMarginRightDp)
+            val ly = loc[1] + container.height - btnSize -
+                style.dp(style.locationMarginBottomDp)
+            if (location.isShowing) {
+                location.update(lx, ly, btnSize, btnSize, true)
+            } else {
+                location.showAtLocation(container, Gravity.NO_GRAVITY, lx, ly)
+            }
+        } catch (t: Throwable) {
+            Log.w(tag, "tmap hud show failed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun dismissHudWindows() {
+        try {
+            summaryPopup?.dismiss()
+        } catch (_: Throwable) {
+        }
+        try {
+            locationPopup?.dismiss()
+        } catch (_: Throwable) {
+        }
+        summaryPopup = null
+        locationPopup = null
+    }
+
+    private fun applyShieldHud(args: Map<String, Any?>?) {
+        if (disposed || !::style.isInitialized) return
+        val title = (args?.get("title") as? String)?.trim().orEmpty()
+            .ifEmpty { TmapHudStyle.DEFAULT_TITLE }
+        val showSummary = args?.get("showSummary") as? Boolean ?: true
+        val total = (args?.get("totalPoints") as? Number)?.toInt() ?: 0
+        val completed = (args?.get("completedPoints") as? Number)?.toInt() ?: 0
+        val remaining = (args?.get("remainingPoints") as? Number)?.toInt() ?: 0
+        val followActive = args?.get("followActive") as? Boolean ?: false
+        val myLocationEnabled = args?.get("myLocationEnabled") as? Boolean ?: true
+        val refreshing = args?.get("refreshing") as? Boolean ?: false
+
+        hudTitle.text = title
+        hudTotal.text = "전체 $total"
+        hudCompleted.text = "완료 $completed"
+        hudRemaining.text = "남음 $remaining"
+        hudSummaryRow.visibility = if (showSummary) View.VISIBLE else View.GONE
+
+        refreshSpinner.visibility = if (refreshing) View.VISIBLE else View.GONE
+        refreshBtn.visibility = if (refreshing) View.GONE else View.VISIBLE
+
+        followActiveVisual = followActive
+        myLocationBtn.isEnabled = myLocationEnabled
+        myLocationBtn.alpha = if (myLocationEnabled) 1f else 0.45f
+        myLocationIcon.setImageResource(
+            if (followActive) {
+                R.drawable.ic_ds_my_location
+            } else {
+                R.drawable.ic_ds_location_searching
+            },
+        )
+        val tint = when {
+            !myLocationEnabled -> style.textSecondary
+            followActive -> style.primary
+            else -> style.textPrimary
+        }
+        myLocationIcon.setColorFilter(tint)
+
+        ensureHudWindowsVisible()
+    }
+
+    private fun installSurfaceDemotionWatcher(root: ViewGroup) {
+        root.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
+            override fun onChildViewAdded(parent: View?, child: View?) {
+                if (disposed || child == null) return
+                demoteIfSurface(child)
+                if (child is ViewGroup) {
+                    installSurfaceDemotionWatcher(child)
+                    for (i in 0 until child.childCount) {
+                        demoteIfSurface(child.getChildAt(i))
+                    }
+                }
+                if (mapReadyEmitted) {
+                    ensureHudWindowsVisible()
+                }
+            }
+
+            override fun onChildViewRemoved(parent: View?, child: View?) = Unit
+        })
+    }
+
+    private fun demoteIfSurface(v: View) {
+        if (v !is SurfaceView) return
+        try {
+            v.setZOrderOnTop(false)
+            v.setZOrderMediaOverlay(false)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun demoteSurfaceViews(reason: String) {
+        fun walk(v: View) {
+            if (v is SurfaceView) demoteIfSurface(v)
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+        }
+        try {
+            walk(container)
+        } catch (t: Throwable) {
+            Log.w(tag, "surface demote failed reason=$reason err=${t.javaClass.simpleName}")
+        }
     }
 
     companion object {
