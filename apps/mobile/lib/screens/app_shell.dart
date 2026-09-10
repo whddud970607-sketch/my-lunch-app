@@ -98,6 +98,7 @@ class _AppShellState extends State<AppShell> {
           refreshTick: _worksetRefreshTick,
           focusPointId: _mapFocusPointId,
           onSelectTab: _goToTab,
+          sessionController: widget.sessionController,
         );
       case AppShellTabs.delivery:
         return DeliveryListScreen(

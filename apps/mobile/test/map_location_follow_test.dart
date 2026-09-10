@@ -193,8 +193,7 @@ void main() {
         isLocationServiceEnabled: () async => true,
         checkPermission: () async => LocationPermission.always,
         requestPermission: () async => LocationPermission.always,
-        getCurrentPosition: (_) async =>
-            _pos(lat: 37.4, lng: 126.7, ts: t0),
+        getCurrentPosition: (_) async => _pos(lat: 37.4, lng: 126.7, ts: t0),
         getPositionStream: (_) => gps.stream,
       );
       coordinator = MapLocationCoordinator(locationService: service);
@@ -218,67 +217,229 @@ void main() {
       expect(map.driverMarkers, isNotEmpty);
     });
 
-    test('C/D: new location updates marker and camera while follow ON',
-        () async {
+    test(
+      'C/D: new location updates marker and camera while follow ON',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        map.cameraMoves.clear();
+        map.driverMarkers.clear();
+        final t1 = DateTime.utc(2026, 9, 5, 10, 0, 2);
+        gps.add(_pos(lat: 37.401, lng: 126.701, ts: t1));
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(map.driverMarkers, isNotEmpty);
+        expect(map.cameraMoves, isNotEmpty);
+        expect(map.driverMarkers.last.latitude, closeTo(37.401, 0.0001));
+        expect(map.cameraMoves.last.latitude, closeTo(37.401, 0.0001));
+      },
+    );
+
+    test(
+      'E: only one logical driver marker id path (latest upsert wins)',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(
+          map.driverMarkers.every((m) => m.snapshot.latitude.isFinite),
+          isTrue,
+        );
+        // Fake records upserts; production uses fixed DriverLocationMarkerIds.
+        expect(DriverVehicleType.values, isNotEmpty);
+      },
+    );
+
+    test(
+      'G/H: user gesture does NOT disable follow; zoom/pan stay free',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+        // Coordinator clears gesture→disableFollow wiring on attach.
+        expect(map.userGesture, isNull);
+        expect(coordinator.followEnabled, isTrue);
+        expect(map.programmaticFlags.last, isTrue);
+      },
+    );
+
+    test(
+      'I/J: location button applies default zoom; GPS follow preserves zoom',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(map.cameraZooms.last, MapLocationCoordinator.followZoom);
+        map.cameraZooms.clear();
+        map.cameraMoves.clear();
+        final t2 = DateTime.utc(2026, 9, 5, 10, 0, 5);
+        gps.add(_pos(lat: 37.402, lng: 126.702, ts: t2));
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(coordinator.followEnabled, isTrue);
+        expect(map.cameraMoves.last.latitude, closeTo(37.402, 0.0001));
+        // Ongoing GPS follow must omit zoom so user pinch level is preserved.
+        expect(map.cameraZooms.last, isNull);
+      },
+    );
+
+    test('pin-adjust suppresses camera but keeps Follow ON', () async {
       await coordinator.startTracking();
       await coordinator.onMyLocationPressed();
+      expect(coordinator.followEnabled, isTrue);
       map.cameraMoves.clear();
-      map.driverMarkers.clear();
-      final t1 = DateTime.utc(2026, 9, 5, 10, 0, 2);
-      gps.add(_pos(lat: 37.401, lng: 126.701, ts: t1));
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(map.driverMarkers, isNotEmpty);
+
+      coordinator.setCameraFollowSuppressed(true);
+      expect(coordinator.followEnabled, isTrue);
+      expect(coordinator.cameraFollowSuppressed, isTrue);
+
+      final t1 = DateTime.utc(2026, 9, 5, 10, 0, 8);
+      gps.add(_pos(lat: 37.405, lng: 126.705, ts: t1));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(coordinator.followEnabled, isTrue);
+      expect(map.cameraMoves, isEmpty);
+
+      coordinator.setCameraFollowSuppressed(false);
+      expect(coordinator.followEnabled, isTrue);
+      final t2 = DateTime.utc(2026, 9, 5, 10, 0, 10);
+      gps.add(_pos(lat: 37.406, lng: 126.706, ts: t2));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(map.cameraMoves, isNotEmpty);
-      expect(map.driverMarkers.last.latitude, closeTo(37.401, 0.0001));
-      expect(map.cameraMoves.last.latitude, closeTo(37.401, 0.0001));
-    });
-
-    test('E: only one logical driver marker id path (latest upsert wins)',
-        () async {
-      await coordinator.startTracking();
-      await coordinator.onMyLocationPressed();
-      expect(
-        map.driverMarkers.every(
-          (m) => m.snapshot.latitude.isFinite,
-        ),
-        isTrue,
-      );
-      // Fake records upserts; production uses fixed DriverLocationMarkerIds.
-      expect(DriverVehicleType.values, isNotEmpty);
-    });
-
-    test('G/H: user gesture does NOT disable follow; zoom/pan stay free',
-        () async {
-      await coordinator.startTracking();
-      await coordinator.onMyLocationPressed();
-      expect(coordinator.followEnabled, isTrue);
-      // Coordinator clears gesture→disableFollow wiring on attach.
-      expect(map.userGesture, isNull);
-      expect(coordinator.followEnabled, isTrue);
-      expect(map.programmaticFlags.last, isTrue);
-    });
-
-    test('I/J: location button applies default zoom; GPS follow preserves zoom',
-        () async {
-      await coordinator.startTracking();
-      await coordinator.onMyLocationPressed();
-      expect(map.cameraZooms.last, MapLocationCoordinator.followZoom);
-      map.cameraZooms.clear();
-      map.cameraMoves.clear();
-      final t2 = DateTime.utc(2026, 9, 5, 10, 0, 5);
-      gps.add(_pos(lat: 37.402, lng: 126.702, ts: t2));
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(coordinator.followEnabled, isTrue);
-      expect(map.cameraMoves.last.latitude, closeTo(37.402, 0.0001));
-      // Ongoing GPS follow must omit zoom so user pinch level is preserved.
       expect(map.cameraZooms.last, isNull);
     });
 
-    test('session end is the Follow OFF path via stopTracking', () async {
+    test(
+      'session end is the Follow OFF path via disableFollow/stopTracking',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+        coordinator.disableFollow();
+        expect(coordinator.followEnabled, isFalse);
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+        await coordinator.stopTracking();
+        expect(coordinator.followEnabled, isFalse);
+      },
+    );
+
+    test('background pauseTracking keeps Follow ON', () async {
       await coordinator.startTracking();
       await coordinator.onMyLocationPressed();
       expect(coordinator.followEnabled, isTrue);
-      await coordinator.stopTracking();
+      await coordinator.pauseTracking();
+      expect(coordinator.followEnabled, isTrue);
+      expect(service.isTracking, isFalse);
+      await coordinator.startTracking();
+      expect(coordinator.followEnabled, isTrue);
+    });
+
+    test(
+      'A: provider switch dispose/remount keeps Follow logically ON',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+
+        coordinator.detachMap();
+        expect(coordinator.followEnabled, isTrue);
+
+        final next = _FakeMapController();
+        coordinator.attachMap(next);
+        expect(coordinator.followEnabled, isTrue);
+      },
+    );
+
+    test(
+      'B: new provider ready auto-resumes camera while Follow stays ON',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+
+        coordinator.detachMap();
+        final next = _FakeMapController();
+        coordinator.attachMap(next);
+        await Future<void>.delayed(const Duration(milliseconds: 850));
+
+        expect(coordinator.followEnabled, isTrue);
+        expect(next.driverMarkers, isNotEmpty);
+        expect(next.cameraMoves, isNotEmpty);
+        expect(next.followFlags.last, isTrue);
+        // Remount resume must preserve user zoom (no default zoom snap).
+        expect(next.cameraZooms.last, isNull);
+      },
+    );
+
+    test('C: background then resume keeps Follow ON', () async {
+      await coordinator.startTracking();
+      await coordinator.onMyLocationPressed();
+      expect(coordinator.followEnabled, isTrue);
+
+      await coordinator.pauseTracking();
+      expect(coordinator.followEnabled, isTrue);
+
+      await coordinator.startTracking();
+      expect(coordinator.followEnabled, isTrue);
+    });
+
+    test(
+      'D: resume + ready controller auto-resumes camera tracking',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        expect(coordinator.followEnabled, isTrue);
+
+        await coordinator.pauseTracking();
+        coordinator.detachMap();
+        map.cameraMoves.clear();
+
+        final next = _FakeMapController();
+        coordinator.attachMap(next);
+        await coordinator.startTracking();
+        await Future<void>.delayed(const Duration(milliseconds: 850));
+
+        expect(coordinator.followEnabled, isTrue);
+        expect(next.cameraMoves, isNotEmpty);
+        expect(next.driverMarkers, isNotEmpty);
+      },
+    );
+
+    test('E: temporary GPS stop preserves Follow ON', () async {
+      await coordinator.startTracking();
+      await coordinator.onMyLocationPressed();
+      expect(coordinator.followEnabled, isTrue);
+      await coordinator.pauseTracking();
+      expect(coordinator.followEnabled, isTrue);
+      expect(service.isTracking, isFalse);
+    });
+
+    test(
+      'F: GPS valid again resumes tracking without clearing Follow',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        map.cameraMoves.clear();
+
+        await coordinator.pauseTracking();
+        expect(coordinator.followEnabled, isTrue);
+
+        await coordinator.startTracking();
+        expect(coordinator.followEnabled, isTrue);
+        // startTracking with Follow ON force-syncs marker/camera when attached.
+        expect(map.cameraMoves, isNotEmpty);
+        expect(map.driverMarkers, isNotEmpty);
+
+        map.cameraMoves.clear();
+        final t = DateTime.utc(2026, 9, 5, 10, 1, 0);
+        gps.add(_pos(lat: 37.410, lng: 126.710, ts: t));
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(coordinator.followEnabled, isTrue);
+        expect(map.cameraMoves.last.latitude, closeTo(37.410, 0.0001));
+      },
+    );
+
+    test('G: delivery session end disables Follow', () async {
+      await coordinator.startTracking();
+      await coordinator.onMyLocationPressed();
+      expect(coordinator.followEnabled, isTrue);
+      coordinator.disableFollow();
       expect(coordinator.followEnabled, isFalse);
     });
 
@@ -287,8 +448,7 @@ void main() {
         isLocationServiceEnabled: () async => true,
         checkPermission: () async => LocationPermission.denied,
         requestPermission: () async => LocationPermission.denied,
-        getCurrentPosition: (_) async =>
-            throw StateError('no gps'),
+        getCurrentPosition: (_) async => throw StateError('no gps'),
         getPositionStream: (_) => const Stream.empty(),
       );
       final c = MapLocationCoordinator(locationService: denied);
@@ -300,23 +460,25 @@ void main() {
       c.dispose();
     });
 
-    test('N: consecutive follow updates use followUpdate (no long queue flag)',
-        () async {
-      await coordinator.startTracking();
-      await coordinator.onMyLocationPressed();
-      map.followFlags.clear();
-      for (var i = 1; i <= 3; i++) {
-        gps.add(
-          _pos(
-            lat: 37.4 + i * 0.001,
-            lng: 126.7,
-            ts: DateTime.utc(2026, 9, 5, 10, 0, i),
-          ),
-        );
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(map.followFlags, isNotEmpty);
-      expect(map.followFlags.every((f) => f), isTrue);
-    });
+    test(
+      'N: consecutive follow updates use followUpdate (no long queue flag)',
+      () async {
+        await coordinator.startTracking();
+        await coordinator.onMyLocationPressed();
+        map.followFlags.clear();
+        for (var i = 1; i <= 3; i++) {
+          gps.add(
+            _pos(
+              lat: 37.4 + i * 0.001,
+              lng: 126.7,
+              ts: DateTime.utc(2026, 9, 5, 10, 0, i),
+            ),
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(map.followFlags, isNotEmpty);
+        expect(map.followFlags.every((f) => f), isTrue);
+      },
+    );
   });
 }

@@ -57,6 +57,11 @@ dependencies {
     implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
     // TMAP Navi UI SDK V1.77 package → artifact 1.0.0.0158 (debug PoC only).
     implementation("com.tmapmobility.tmap:tmap-ui-sdk:1.0.0.0158")
+    // TMAP Vector Map core (MP-C2A). Single VSM = Maven vsm-tmap-sdk via tmap-ui-sdk.
+    // Do NOT package portal vsm-tmap-sdk-v2-eaa-*.aar alongside Navi VSM.
+    implementation(files("libs/tmap-sdk-3.7.aar"))
+    // Required by official Vector Map sample (TMapVSMSDK_3.7).
+    implementation("com.google.flatbuffers:flatbuffers-java:24.3.25")
     // Align with official Kotlin sample pin (TMAP POM declares 21.0.1).
     implementation("com.google.android.gms:play-services-location:21.3.0")
 }

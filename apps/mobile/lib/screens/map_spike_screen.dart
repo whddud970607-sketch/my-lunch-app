@@ -24,6 +24,7 @@ import '../services/api_client.dart';
 import '../services/api_exception.dart';
 import '../services/map_spike_service.dart';
 import '../services/today_workset_repository.dart';
+import '../state/delivery_session_controller.dart';
 import '../sync/completion_projection_store.dart';
 import '../sync/sync_scope.dart';
 import '../theme/app_colors.dart';
@@ -61,6 +62,7 @@ class MapSpikeScreen extends StatefulWidget {
     this.initialWorkset,
     this.onSelectTab,
     this.refreshTick,
+    this.sessionController,
   });
 
   final ApiClient apiClient;
@@ -85,6 +87,9 @@ class MapSpikeScreen extends StatefulWidget {
   final ValueChanged<int>? onSelectTab;
   final ValueNotifier<int>? refreshTick;
 
+  /// When delivery session/workday ends → Follow OFF (locked product policy).
+  final DeliverySessionController? sessionController;
+
   @override
   State<MapSpikeScreen> createState() => _MapSpikeScreenState();
 }
@@ -92,8 +97,9 @@ class MapSpikeScreen extends StatefulWidget {
 class _MapSpikeScreenState extends State<MapSpikeScreen>
     with WidgetsBindingObserver {
   late final MapSpikeService _service = MapSpikeService(widget.apiClient);
-  late final TodayWorksetRepository _todayRepo =
-      TodayWorksetRepository(widget.apiClient);
+  late final TodayWorksetRepository _todayRepo = TodayWorksetRepository(
+    widget.apiClient,
+  );
   late final MapLocationCoordinator _locationCoordinator =
       MapLocationCoordinator()..bindPositionStream();
 
@@ -125,6 +131,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   final Map<String, MapSpikePoint> _preOptimisticByPointId = {};
   CompletionProjectionStore? _projections;
   bool _projectionListenerAttached = false;
+  DeliveryLifecyclePhase? _lastSessionPhase;
 
   DeliveryMapDataSource get _effectiveSource {
     if (widget.useNamdong10Fixture) return DeliveryMapDataSource.namdong10;
@@ -137,6 +144,11 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     WidgetsBinding.instance.addObserver(this);
     _locationCoordinator.addListener(_onLocationCoordinatorChanged);
     widget.refreshTick?.addListener(_onExternalRefresh);
+    final session = widget.sessionController;
+    if (session != null) {
+      _lastSessionPhase = session.phase;
+      session.addListener(_onDeliverySessionChanged);
+    }
     debugPrint('[MAP] screen build');
     _bootstrap();
     _armNativeReadyTimeout();
@@ -154,6 +166,16 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       oldWidget.refreshTick?.removeListener(_onExternalRefresh);
       widget.refreshTick?.addListener(_onExternalRefresh);
     }
+    if (widget.sessionController != oldWidget.sessionController) {
+      oldWidget.sessionController?.removeListener(_onDeliverySessionChanged);
+      final session = widget.sessionController;
+      if (session != null) {
+        _lastSessionPhase = session.phase;
+        session.addListener(_onDeliverySessionChanged);
+      } else {
+        _lastSessionPhase = null;
+      }
+    }
     final focusId = widget.focusPointId;
     if (focusId != null &&
         focusId.isNotEmpty &&
@@ -167,6 +189,26 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     }
   }
 
+  void _onDeliverySessionChanged() {
+    final session = widget.sessionController;
+    if (session == null) return;
+    final prev = _lastSessionPhase;
+    final next = session.phase;
+    _lastSessionPhase = next;
+    // Locked policy: only delivery-session end turns Follow OFF.
+    final wasInProgress =
+        prev == DeliveryLifecyclePhase.active ||
+        prev == DeliveryLifecyclePhase.activeNoSession ||
+        prev == DeliveryLifecyclePhase.ending ||
+        prev == DeliveryLifecyclePhase.endRetryable;
+    final ended =
+        next == DeliveryLifecyclePhase.completed ||
+        next == DeliveryLifecyclePhase.idle;
+    if (wasInProgress && ended) {
+      _locationCoordinator.disableFollow();
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -174,9 +216,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     // Must not early-return before this — otherwise offstage→onstage never recreates.
     final visible = TickerMode.valuesOf(context).enabled;
     if (MapHostPolicy.shouldRecreateAfterOffstage(
-          becameVisible: visible && !_tickerOn,
-          nativeReady: _nativeReady,
-        )) {
+      becameVisible: visible && !_tickerOn,
+      nativeReady: _nativeReady,
+    )) {
       debugPrint('[MAP] offstage return recreate');
       _recreateNativeMap('offstage');
     }
@@ -240,13 +282,15 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
           _recreateNativeMap('app_resume');
         }
         _locationCoordinator.loadVehicleType().then((_) {
+          // Resume GPS; Follow state is preserved across pause.
           _locationCoordinator.startTracking();
         });
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        _locationCoordinator.stopTracking();
+        // Do NOT clear Follow — only session end may turn Follow OFF.
+        _locationCoordinator.pauseTracking();
     }
   }
 
@@ -269,6 +313,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       _projections!.removeListener(_onProjectionsChanged);
     }
     widget.refreshTick?.removeListener(_onExternalRefresh);
+    widget.sessionController?.removeListener(_onDeliverySessionChanged);
     WidgetsBinding.instance.removeObserver(this);
     _locationCoordinator.removeListener(_onLocationCoordinatorChanged);
     _locationCoordinator.dispose();
@@ -313,9 +358,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     _pinsByMarkerId
       ..clear()
       ..addEntries(
-        groupPointsByLocation(filtered).map(
-          (pin) => MapEntry(pin.markerId, pin),
-        ),
+        groupPointsByLocation(filtered)
+            .map((pin) => MapEntry(pin.markerId, pin)),
       );
   }
 
@@ -417,9 +461,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       final trackingOk = await _locationCoordinator.startTracking();
       if (!trackingOk && mounted && _locationCoordinator.permissionDenied) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('위치 권한이 없어 내 위치 기능을 사용할 수 없습니다'),
-          ),
+          const SnackBar(content: Text('위치 권한이 없어 내 위치 기능을 사용할 수 없습니다')),
         );
       }
     } on ApiException catch (e) {
@@ -449,7 +491,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   }
 
   Future<({List<MapSpikePoint> points, int apiMs, TodayWorkset workset})>
-      _loadToday() async {
+  _loadToday() async {
     final driverId = widget.driverId?.trim() ?? '';
     TodayWorkset workset;
     int apiMs;
@@ -468,10 +510,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     // Production Today path: no namdong10 soft-enrich dependency.
     // Skip invalid pins; never fail the whole map host for one point.
     final points = TodayWorksetMapAdapter.retainRenderableMapPoints(
-      TodayWorksetMapAdapter.toMapPoints(
-        workset,
-        driverId: driverId,
-      ),
+      TodayWorksetMapAdapter.toMapPoints(workset, driverId: driverId),
     );
     _detailHydratedPointIds.clear();
     return (points: points, apiMs: apiMs, workset: workset);
@@ -502,10 +541,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await controller.moveCamera(
-        DeliveryLatLng(
-          latitude: point.latitude,
-          longitude: point.longitude,
-        ),
+        DeliveryLatLng(latitude: point.latitude, longitude: point.longitude),
         zoom: 15,
         programmatic: true,
       );
@@ -565,8 +601,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         piiMasked: rich.piiMasked,
         status: rich.status.isNotEmpty ? rich.status : existing.status,
         statusCode: rich.statusCode,
-        shipments:
-            rich.shipments.isNotEmpty ? rich.shipments : existing.shipments,
+        shipments: rich.shipments.isNotEmpty
+            ? rich.shipments
+            : existing.shipments,
         companyId: rich.companyId ?? existing.companyId,
         companyLabel: existing.companyLabel,
         sourceLabel: existing.sourceLabel,
@@ -608,9 +645,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         startLongitude: snap?.longitude,
       );
       if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('길찾기를 열 수 없습니다')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('길찾기를 열 수 없습니다')));
       }
       return;
     }
@@ -622,9 +658,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       preferredProvider: _mapProviderId,
     );
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('길찾기를 열 수 없습니다')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('길찾기를 열 수 없습니다')));
     }
   }
 
@@ -640,10 +675,10 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       }
       final midLat =
           cameraSource.map((p) => p.latitude).reduce((a, b) => a + b) /
-              cameraSource.length;
+          cameraSource.length;
       final midLng =
           cameraSource.map((p) => p.longitude).reduce((a, b) => a + b) /
-              cameraSource.length;
+          cameraSource.length;
       return DeliveryLatLng(latitude: midLat, longitude: midLng);
     }
     final snap = _locationCoordinator.locationService.lastSnapshot;
@@ -651,10 +686,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (!PointExternalNavi.isValidCoordinate(snap.latitude, snap.longitude)) {
       return null;
     }
-    return DeliveryLatLng(
-      latitude: snap.latitude,
-      longitude: snap.longitude,
-    );
+    return DeliveryLatLng(latitude: snap.latitude, longitude: snap.longitude);
   }
 
   void _setFilter(WorksetMapFilter filter) {
@@ -670,7 +702,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   Future<void> _startPinAdjust(MapSpikePoint point) async {
     _adjustingPointId = point.pointId;
     _closePanel();
-    _locationCoordinator.disableFollow();
+    // Follow stays ON; only suppress camera recenter while adjusting.
+    _locationCoordinator.setCameraFollowSuppressed(true);
     _pinAdjustMode.value = true;
   }
 
@@ -711,6 +744,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       await controller.upsertPin(newPin);
       _adjustingPointId = null;
       _pinAdjustMode.value = false;
+      _locationCoordinator.setCameraFollowSuppressed(false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('배송 위치로 저장됨 (driver_verified)')),
@@ -718,9 +752,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       }
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message)),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
   }
@@ -804,8 +837,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       widget.onSelectTab?.call(AppShellTabs.delivery);
       return;
     }
-    if (parsed.action == CompleteNavAction.next &&
-        parsed.nextPointId != null) {
+    if (parsed.action == CompleteNavAction.next && parsed.nextPointId != null) {
       _revealPoint(parsed.nextPointId!);
     }
   }
@@ -828,17 +860,16 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     _selectedMarkerId.value = selected;
     _selectedPointId.value = selectedPoint;
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${id.displayLabel}으로 전환했습니다')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('${id.displayLabel}으로 전환했습니다')));
     }
   }
 
   String get _mapTitle => switch (_effectiveSource) {
-        DeliveryMapDataSource.today => '통합 지도',
-        DeliveryMapDataSource.namdong10 => '배송 지도 (남동구 fixture)',
-        DeliveryMapDataSource.singleSpike => '배송 지도 (Spike)',
-      };
+    DeliveryMapDataSource.today => '통합 지도',
+    DeliveryMapDataSource.namdong10 => '배송 지도 (남동구 fixture)',
+    DeliveryMapDataSource.singleSpike => '배송 지도 (Spike)',
+  };
 
   UnifiedMapOverlay _overlay({required bool stale}) {
     final today = _effectiveSource == DeliveryMapDataSource.today;
@@ -849,9 +880,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       totalPoints: summary?.totalPoints ?? 0,
       completedPoints: summary?.completedPoints ?? 0,
       remainingPoints: summary?.remainingPoints ?? 0,
-      filters: today
-          ? WorksetMapFilterChips.fromWorkset(_workset)
-          : const [],
+      filters: today ? WorksetMapFilterChips.fromWorkset(_workset) : const [],
       selectedFilter: _filter,
       onFilterSelected: today ? _setFilter : null,
       onRefresh: () => _load(isRefresh: true),
@@ -866,21 +895,16 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: _buildBody(),
-    );
+    return Scaffold(backgroundColor: AppColors.background, body: _buildBody());
   }
 
   Widget _buildBody() {
     final stale = _error != null && _pointsById.isNotEmpty;
     final overlay = _overlay(stale: stale);
     final pins = _pinsByMarkerId.values.toList(growable: false);
-    final initial = _cameraTarget() ??
-        const DeliveryLatLng(
-          latitude: 37.5665,
-          longitude: 126.9780,
-        );
+    final initial =
+        _cameraTarget() ??
+        const DeliveryLatLng(latitude: 37.5665, longitude: 126.9780);
     final showLoading = _loading && _pointsById.isEmpty;
     final showError = _error != null && _pointsById.isEmpty;
 
@@ -899,15 +923,21 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
               } else {
                 debugPrint('[MAP] surface ZERO size');
               }
-              return DeliveryMapSurface(
-                key: ValueKey(
-                  'map-surface-$_mapProviderId-$_mapHostGeneration',
-                ),
-                providerId: _mapProviderId,
-                initialTarget: initial,
-                pins: pins,
-                onPinTap: _onPinTap,
-                onReady: _onMapReady,
+              return ValueListenableBuilder<String?>(
+                valueListenable: _selectedMarkerId,
+                builder: (context, selectedMarkerId, _) {
+                  return DeliveryMapSurface(
+                    key: ValueKey(
+                      'map-surface-$_mapProviderId-$_mapHostGeneration',
+                    ),
+                    providerId: _mapProviderId,
+                    initialTarget: initial,
+                    pins: pins,
+                    onPinTap: _onPinTap,
+                    onReady: _onMapReady,
+                    selectedMarkerId: selectedMarkerId,
+                  );
+                },
               );
             },
           ),
@@ -932,9 +962,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                     child: Padding(
                       padding: EdgeInsets.only(
                         right: AppSpacing.md,
-                        bottom: selectedId != null
-                            ? 176
-                            : AppSpacing.lg,
+                        bottom: selectedId != null ? 176 : AppSpacing.lg,
                       ),
                       child: MyLocationButton(
                         key: UnifiedMapKeys.currentLocation,
@@ -975,6 +1003,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                                 onPressed: () {
                                   _adjustingPointId = null;
                                   _pinAdjustMode.value = false;
+                                  _locationCoordinator
+                                      .setCameraFollowSuppressed(false);
                                 },
                                 child: const Text('취소'),
                               ),
@@ -1013,8 +1043,9 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                       (p) => p.pointId == selectedPointId,
                       orElse: () => pin.primaryPoint,
                     );
-                    final canNavigate =
-                        PointExternalNavi.hasValidDestination(point);
+                    final canNavigate = PointExternalNavi.hasValidDestination(
+                      point,
+                    );
                     return Align(
                       alignment: Alignment.bottomCenter,
                       child: _detailOpen
@@ -1022,8 +1053,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                               point: point,
                               totalQuantity: point.quantity,
                               clusteredJobCount: pin.points.length,
-                              clusterPoints:
-                                  pin.isCluster ? pin.points : null,
+                              clusterPoints: pin.isCluster ? pin.points : null,
                               onSelectClusterPoint: pin.isCluster
                                   ? (p) {
                                       _selectedPointId.value = p.pointId;

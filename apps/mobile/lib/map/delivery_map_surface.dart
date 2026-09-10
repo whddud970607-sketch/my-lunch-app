@@ -16,6 +16,7 @@ class DeliveryMapSurface extends StatelessWidget {
     required this.pins,
     required this.onPinTap,
     required this.onReady,
+    this.selectedMarkerId,
   });
 
   final MapProviderId providerId;
@@ -23,6 +24,9 @@ class DeliveryMapSurface extends StatelessWidget {
   final List<DeliveryLocationPin> pins;
   final DeliveryPinTapCallback onPinTap;
   final DeliveryMapReadyCallback onReady;
+
+  /// Optional Flutter-owned selection (used by TMAP pin chrome restore).
+  final String? selectedMarkerId;
 
   @override
   Widget build(BuildContext context) {
@@ -50,6 +54,7 @@ class DeliveryMapSurface extends StatelessWidget {
           pins: pins,
           onPinTap: onPinTap,
           onReady: onReady,
+          selectedMarkerId: selectedMarkerId,
         );
     }
   }

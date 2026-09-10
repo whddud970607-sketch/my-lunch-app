@@ -9,6 +9,16 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine
+            .platformViewsController
+            .registry
+            .registerViewFactory(
+                "delivery_shield/tmap_vector_map",
+                TmapVectorMapFactory(
+                    flutterEngine.dartExecutor.binaryMessenger,
+                    this,
+                ),
+            )
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "delivery_shield/device",

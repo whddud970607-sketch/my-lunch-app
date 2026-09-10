@@ -15,15 +15,15 @@ import 'delivery_map_controller.dart';
 /// Follow Mode is for the Delivery Shield map host only — never drives
 /// Kakao KNSDK [KNNaviView] navigation camera.
 class MapLocationCoordinator extends ChangeNotifier {
-  MapLocationCoordinator({
-    DriverLocationService? locationService,
-  }) : _locationService = locationService ?? DriverLocationService();
+  MapLocationCoordinator({DriverLocationService? locationService})
+    : _locationService = locationService ?? DriverLocationService();
 
   final DriverLocationService _locationService;
 
   DeliveryMapController? _mapController;
   DriverVehicleType _vehicle = DriverVehicleSettings.defaultVehicle;
   bool _followEnabled = false;
+  bool _cameraFollowSuppressed = false;
   bool _permissionDenied = false;
   DriverLocationMarkerState? _lastMarkerState;
   StreamSubscription<DriverLocationSnapshot>? _positionSub;
@@ -36,6 +36,9 @@ class MapLocationCoordinator extends ChangeNotifier {
   DriverLocationService get locationService => _locationService;
 
   bool get followEnabled => _followEnabled;
+
+  /// When true (e.g. pin-adjust), Follow stays ON but GPS does not recenter.
+  bool get cameraFollowSuppressed => _cameraFollowSuppressed;
 
   bool get hasLocation => _locationService.lastSnapshot != null;
 
@@ -61,6 +64,12 @@ class MapLocationCoordinator extends ChangeNotifier {
           DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
           force: true,
         );
+        // Provider remount / resume: Follow stays logically ON; camera must
+        // resume automatically once the new controller is ready — no button.
+        if (_followEnabled && !_cameraFollowSuppressed) {
+          debugPrint('[FOLLOW] attachMap auto-resume camera');
+          _followCameraLatest(snapshot.latitude, snapshot.longitude);
+        }
       }),
     );
   }
@@ -97,20 +106,45 @@ class MapLocationCoordinator extends ChangeNotifier {
     final ok = await _locationService.start();
     if (!ok) {
       _permissionDenied = true;
-      _followEnabled = false;
+      // Temporary GPS / service loss must NOT clear Follow. Only session end,
+      // stopTracking, or a failed user attempt to enable Follow may turn it OFF.
       notifyListeners();
       return false;
     }
     _permissionDenied = false;
     notifyListeners();
+    // Resume marker + camera after background pause while Follow stays ON.
+    if (_followEnabled && !_cameraFollowSuppressed) {
+      final snapshot = _locationService.lastSnapshot;
+      if (snapshot != null && _mapController != null) {
+        await _syncDriverMarker(
+          DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
+          force: true,
+        );
+        _followCameraLatest(snapshot.latitude, snapshot.longitude);
+      }
+    }
     return true;
   }
 
+  /// Stops GPS stream, removes driver marker, and turns Follow OFF.
+  ///
+  /// Prefer [disableFollow] when only Follow must end (delivery-session end).
+  /// Prefer [pauseTracking] for app background — Follow must survive pause.
   Future<void> stopTracking() async {
     await _locationService.stop();
     await _mapController?.removeDriverMarker();
     _lastMarkerState = null;
     _followEnabled = false;
+    _cameraFollowSuppressed = false;
+    notifyListeners();
+  }
+
+  /// Pauses GPS updates without clearing Follow or the last valid marker.
+  ///
+  /// Locked policy: background/resume must NOT turn Follow OFF.
+  Future<void> pauseTracking() async {
+    await _locationService.stop();
     notifyListeners();
   }
 
@@ -127,8 +161,11 @@ class MapLocationCoordinator extends ChangeNotifier {
     _syncDriverMarker(
       DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
     );
-    if (_followEnabled) {
-      _followCameraLatest(snapshot.latitude, snapshot.longitude);
+    if (_followEnabled && !_cameraFollowSuppressed) {
+      // Reuse shared significance floor — skip negligible camera spam.
+      if (previous == null || snapshot.isSignificantMarkerChange(previous)) {
+        _followCameraLatest(snapshot.latitude, snapshot.longitude);
+      }
     }
     notifyListeners();
   }
@@ -156,6 +193,7 @@ class MapLocationCoordinator extends ChangeNotifier {
       DriverLocationMarkerState(snapshot: snapshot, vehicle: _vehicle),
       force: true,
     );
+    // Explicit user action may recenter even during pin-adjust suppression.
     _followCameraLatest(
       snapshot.latitude,
       snapshot.longitude,
@@ -164,9 +202,22 @@ class MapLocationCoordinator extends ChangeNotifier {
     );
   }
 
+  /// Suppress automatic Follow camera recenters without turning Follow OFF.
+  ///
+  /// Used by pin-adjust so the user can pan freely while Follow remains ON.
+  void setCameraFollowSuppressed(bool suppressed) {
+    if (_cameraFollowSuppressed == suppressed) return;
+    _cameraFollowSuppressed = suppressed;
+    if (suppressed) {
+      _cameraFollowGeneration++;
+    }
+    notifyListeners();
+  }
+
   void disableFollow() {
-    if (!_followEnabled) return;
+    if (!_followEnabled && !_cameraFollowSuppressed) return;
     _followEnabled = false;
+    _cameraFollowSuppressed = false;
     _cameraFollowGeneration++;
     notifyListeners();
   }
@@ -191,10 +242,12 @@ class MapLocationCoordinator extends ChangeNotifier {
       followUpdate: true,
     );
     if (awaitCompletion) {
-      unawaited(future.then((_) {
-        // Ignore if superseded while awaiting first center.
-        if (gen != _cameraFollowGeneration) return;
-      }));
+      unawaited(
+        future.then((_) {
+          // Ignore if superseded while awaiting first center.
+          if (gen != _cameraFollowGeneration) return;
+        }),
+      );
       return;
     }
     unawaited(future);

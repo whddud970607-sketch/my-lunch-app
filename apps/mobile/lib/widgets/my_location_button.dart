@@ -19,20 +19,25 @@ class MyLocationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      elevation: 4,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      color: AppColors.surfaceElevated,
-      child: InkWell(
+    return Semantics(
+      label: followActive ? 'follow_on' : 'follow_off',
+      button: true,
+      enabled: enabled,
+      child: Material(
+        elevation: 4,
         borderRadius: BorderRadius.circular(AppRadius.md),
-        onTap: enabled ? onPressed : null,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Icon(
-            followActive ? Icons.my_location : Icons.location_searching,
-            color: enabled
-                ? (followActive ? AppColors.primary : AppColors.textPrimary)
-                : AppColors.textSecondary,
+        color: AppColors.surfaceElevated,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          onTap: enabled ? onPressed : null,
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Icon(
+              followActive ? Icons.my_location : Icons.location_searching,
+              color: enabled
+                  ? (followActive ? AppColors.primary : AppColors.textPrimary)
+                  : AppColors.textSecondary,
+            ),
           ),
         ),
       ),

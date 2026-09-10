@@ -1,6 +1,8 @@
 import '../config/app_config.dart';
 
-/// Feature guard for existing TMAP Navi UI SDK (not Vector Map / TMapView).
+/// Feature guard for TMAP AppKey ([TMAP_API_KEY]).
+///
+/// Used by Vector Map (`TMapView.setSKTMapApiKey`) and the existing Navi PoC.
 class TmapMapFeature {
   TmapMapFeature._();
 

@@ -8,6 +8,7 @@ import 'package:delivery_shield_mobile/theme/app_theme.dart';
 import 'package:delivery_shield_mobile/widgets/delivery_detail_panel.dart';
 
 MapSpikePoint _point({
+  String pointId = 'pt-synth-1',
   String product = 'SYNTH-BLDG',
   String address = '',
   String detailAddress = '',
@@ -36,7 +37,7 @@ MapSpikePoint _point({
     quantity: quantity,
     status: completed ? '완료' : '미완료',
     statusCode: completed ? 'completed' : 'pending',
-    pointId: 'pt-synth-1',
+    pointId: pointId,
     jobId: 'job-synth-1',
     driverId: driverId,
     piiMasked: piiMasked,
@@ -146,22 +147,14 @@ void main() {
 
   testWidgets('NAVIGATE_VALID_COORDINATES shows 길찾기', (tester) async {
     var nav = 0;
-    await _pumpPanel(
-      tester,
-      point: _point(),
-      onNavigate: () => nav++,
-    );
+    await _pumpPanel(tester, point: _point(), onNavigate: () => nav++);
     expect(find.byKey(DeliveryDetailKeys.navigate), findsOneWidget);
     await tester.tap(find.byKey(DeliveryDetailKeys.navigate));
     expect(nav, 1);
   });
 
   testWidgets('NAVIGATE_INVALID_COORDINATES_HIDDEN', (tester) async {
-    await _pumpPanel(
-      tester,
-      point: _point(lat: 0, lng: 0),
-      onNavigate: () {},
-    );
+    await _pumpPanel(tester, point: _point(lat: 0, lng: 0), onNavigate: () {});
     expect(find.byKey(DeliveryDetailKeys.navigate), findsNothing);
     expect(find.text('길찾기'), findsNothing);
   });
@@ -170,10 +163,7 @@ void main() {
     tester,
   ) async {
     const synthetic = '00000000001';
-    await _pumpPanel(
-      tester,
-      point: _point(contactValue: synthetic),
-    );
+    await _pumpPanel(tester, point: _point(contactValue: synthetic));
     expect(find.byKey(DeliveryDetailKeys.callAction), findsOneWidget);
     expect(find.byKey(DeliveryDetailKeys.smsAction), findsOneWidget);
     expect(find.text('전화'), findsOneWidget);
@@ -234,16 +224,14 @@ void main() {
     expect(find.byKey(DeliveryDetailKeys.phoneReveal), findsNothing);
     expect(find.text('synth-access-token'), findsNothing);
     expect(find.text('00000000001'), findsNothing);
-    expect(find.text('완료 배송지는 출입정보를 표시하지 않습니다'), findsOneWidget);
+    expect(find.text('완료 배송지는 공동현관 비밀번호를 표시하지 않습니다'), findsOneWidget);
   });
 
-  testWidgets('COMPLETE_ACTION_OPEN_POINT reuses callback only', (tester) async {
+  testWidgets('COMPLETE_ACTION_OPEN_POINT reuses callback only', (
+    tester,
+  ) async {
     var complete = 0;
-    await _pumpPanel(
-      tester,
-      point: _point(),
-      onComplete: () => complete++,
-    );
+    await _pumpPanel(tester, point: _point(), onComplete: () => complete++);
     expect(find.byKey(DeliveryDetailKeys.complete), findsOneWidget);
     await tester.tap(find.byKey(DeliveryDetailKeys.complete));
     expect(complete, 1);
@@ -251,11 +239,7 @@ void main() {
   });
 
   testWidgets('SHIPMENT_PRESENTATION shows real tracking only', (tester) async {
-    await _pumpPanel(
-      tester,
-      point: _point(),
-      shipmentCount: 3,
-    );
+    await _pumpPanel(tester, point: _point(), shipmentCount: 3);
     expect(find.byKey(DeliveryDetailKeys.shipments), findsNothing);
     expect(find.text('배송 3건 · 물량 4'), findsOneWidget);
 
@@ -275,6 +259,51 @@ void main() {
     );
     expect(find.byKey(DeliveryDetailKeys.shipments), findsOneWidget);
     expect(find.text('TRK-SYNTH-1'), findsOneWidget);
+  });
+
+  testWidgets('ACCESS shows 공동현관 비밀번호 button when hasAccessInfo', (
+    tester,
+  ) async {
+    await _pumpPanel(
+      tester,
+      point: _point(hasAccessInfo: true),
+      onRevealAccessInfo: (_) async => 'synth-access-token',
+    );
+    expect(find.text('공동현관 비밀번호'), findsOneWidget);
+    expect(find.text('공동현관 비밀번호 보기'), findsOneWidget);
+    expect(find.byKey(DeliveryDetailKeys.accessReveal), findsOneWidget);
+    expect(find.text('synth-access-token'), findsNothing);
+
+    await tester.tap(find.byKey(DeliveryDetailKeys.accessReveal));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('synth-access-token'), findsOneWidget);
+    expect(find.text('비밀번호 숨기기'), findsOneWidget);
+  });
+
+  testWidgets('ACCESS clears previous secret when selected delivery changes', (
+    tester,
+  ) async {
+    const accessA = 'secret-for-point-a';
+    const accessB = 'secret-for-point-b';
+    await _pumpPanel(
+      tester,
+      point: _point(pointId: 'point-a', hasAccessInfo: true),
+      onRevealAccessInfo: (id) async => id == 'point-a' ? accessA : accessB,
+    );
+    await tester.tap(find.byKey(DeliveryDetailKeys.accessReveal));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(accessA), findsOneWidget);
+
+    await _pumpPanel(
+      tester,
+      point: _point(pointId: 'point-b', hasAccessInfo: true),
+      onRevealAccessInfo: (id) async => id == 'point-a' ? accessA : accessB,
+    );
+    expect(find.text(accessA), findsNothing);
+    expect(find.text(accessB), findsNothing);
+    expect(find.text('공동현관 비밀번호 보기'), findsOneWidget);
   });
 
   testWidgets('DRIVER_UUID_HIDDEN and no fake building access', (tester) async {

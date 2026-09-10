@@ -149,7 +149,7 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
       if (!mounted) return;
       setState(() {
         _accessLoading = false;
-        _accessError = '출입정보를 불러오지 못했습니다';
+        _accessError = '공동현관 비밀번호를 불러오지 못했습니다';
       });
     }
   }
@@ -185,9 +185,8 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
     if (value == null) return;
     await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('주소를 복사했습니다')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('주소를 복사했습니다')));
   }
 
   void _handleClose() {
@@ -218,10 +217,8 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
     final point = _point;
     final bottom = MediaQuery.paddingOf(context).bottom;
     final completed = point.isCompleted;
-    final canNavigate =
-        widget.onNavigate != null && detailCanNavigate(point);
-    final showComplete =
-        widget.onComplete != null && detailShowComplete(point);
+    final canNavigate = widget.onNavigate != null && detailCanNavigate(point);
+    final showComplete = widget.onComplete != null && detailShowComplete(point);
     final deliveryCount = detailDeliveryCount(
       point: point,
       shipmentCount: widget.shipmentCount,
@@ -441,17 +438,75 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          '출입정보',
+                          '공동현관 비밀번호',
                           style: AppTypography.textTheme.titleSmall,
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        OutlinedButton(
-                          key: DeliveryDetailKeys.accessReveal,
-                          onPressed: _accessLoading ? null : _toggleAccess,
-                          child: Text(
-                            _accessPlaintext != null
-                                ? '출입정보 숨기기'
-                                : '출입정보 보기',
+                        Material(
+                          color: AppColors.surface,
+                          elevation: 3,
+                          shadowColor: Colors.black54,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          child: InkWell(
+                            key: DeliveryDetailKeys.accessReveal,
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            onTap: _accessLoading ? null : _toggleAccess,
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.md,
+                                ),
+                                border: Border.all(
+                                  color: AppColors.outline,
+                                  width: 1.2,
+                                ),
+                                color: AppColors.surface,
+                              ),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minHeight: 56,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppSpacing.md,
+                                    vertical: AppSpacing.md,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        _accessPlaintext != null
+                                            ? Icons.lock_open_rounded
+                                            : Icons.lock_outline_rounded,
+                                        color: AppColors.primary,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: AppSpacing.sm),
+                                      Expanded(
+                                        child: Text(
+                                          _accessPlaintext != null
+                                              ? '비밀번호 숨기기'
+                                              : '공동현관 비밀번호 보기',
+                                          style: AppTypography
+                                              .textTheme
+                                              .titleSmall
+                                              ?.copyWith(
+                                                color: AppColors.textPrimary,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                      ),
+                                      Icon(
+                                        _accessPlaintext != null
+                                            ? Icons.visibility_off_outlined
+                                            : Icons.visibility_outlined,
+                                        color: AppColors.textSecondary,
+                                        size: 20,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                         if (_accessLoading)
@@ -472,11 +527,26 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
                           Padding(
                             padding: const EdgeInsets.only(top: AppSpacing.sm),
                             child: Semantics(
-                              label: '출입정보 표시됨',
-                              child: Text(
-                                _accessPlaintext!,
-                                key: DeliveryDetailKeys.accessValue,
-                                style: AppTypography.textTheme.titleMedium,
+                              label: '공동현관 비밀번호 표시됨',
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(AppSpacing.md),
+                                decoration: BoxDecoration(
+                                  color: AppColors.background,
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.sm,
+                                  ),
+                                  border: Border.all(color: AppColors.outline),
+                                ),
+                                child: Text(
+                                  _accessPlaintext!,
+                                  key: DeliveryDetailKeys.accessValue,
+                                  style: AppTypography.textTheme.titleMedium
+                                      ?.copyWith(
+                                        letterSpacing: 0.5,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
                               ),
                             ),
                           ),
@@ -486,7 +556,7 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
                 ] else if (detailShowCompletedAccessPolicy(point)) ...[
                   const SizedBox(height: AppSpacing.sm),
                   Text(
-                    '완료 배송지는 출입정보를 표시하지 않습니다',
+                    '완료 배송지는 공동현관 비밀번호를 표시하지 않습니다',
                     style: AppTypography.textTheme.bodySmall,
                   ),
                 ],
@@ -504,9 +574,7 @@ class _DeliveryDetailPanelState extends State<DeliveryDetailPanel> {
                         OutlinedButton(
                           key: DeliveryDetailKeys.phoneReveal,
                           onPressed: _togglePhone,
-                          child: Text(
-                            _phoneRevealed ? '연락처 숨기기' : '연락처 보기',
-                          ),
+                          child: Text(_phoneRevealed ? '연락처 숨기기' : '연락처 보기'),
                         ),
                         if (_phoneRevealed &&
                             phoneValue != null &&
