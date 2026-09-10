@@ -52,9 +52,12 @@ class _AuthGateState extends State<AuthGate> {
     final state = widget.controller.state;
     final driverId = widget.controller.me?.driver?.id;
 
+    // Sync bind + session restore ONLY after GET /me confirms driver.
     if (state == AuthViewState.signedIn &&
+        widget.controller.isDriverAuthorized &&
         driverId != null &&
         driverId.isNotEmpty) {
+      StartupTiming.markSync('AUTHORIZED_CONTENT_VISIBLE', once: true);
       StartupTiming.markSync('APP_SHELL_VISIBLE', once: true);
       StartupTiming.markSync('FIRST_INTERACTIVE_SCREEN', once: true);
       if (_boundDriverId == driverId &&
@@ -81,24 +84,53 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  bool get _showAuthenticatedShell {
+    final c = widget.controller;
+    switch (c.state) {
+      case AuthViewState.awaitingProfile:
+        return true;
+      case AuthViewState.signedIn:
+        return true;
+      case AuthViewState.error:
+        // Transient /me failure: keep non-sensitive shell while session valid.
+        return c.hasLocalSession;
+      case AuthViewState.loading:
+      case AuthViewState.signedOut:
+        return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
+        if (_showAuthenticatedShell) {
+          if (widget.controller.state == AuthViewState.awaitingProfile ||
+              (widget.controller.state == AuthViewState.error &&
+                  widget.controller.hasLocalSession)) {
+            StartupTiming.markSync('SAFE_SHELL_VISIBLE', once: true);
+          }
+          return AppShell(
+            controller: widget.controller,
+            sessionController: widget.sessionController,
+          );
+        }
         switch (widget.controller.state) {
           case AuthViewState.loading:
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
+          case AuthViewState.signedOut:
+          case AuthViewState.error:
+            return LoginScreen(controller: widget.controller);
+          case AuthViewState.awaitingProfile:
           case AuthViewState.signedIn:
+            // Unreachable: handled by _showAuthenticatedShell.
             return AppShell(
               controller: widget.controller,
               sessionController: widget.sessionController,
             );
-          case AuthViewState.signedOut:
-          case AuthViewState.error:
-            return LoginScreen(controller: widget.controller);
         }
       },
     );

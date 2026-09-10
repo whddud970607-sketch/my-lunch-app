@@ -9,7 +9,11 @@ import '../services/auth_service.dart';
 import '../services/me_service.dart';
 import '../services/permissions_stub.dart';
 
-enum AuthViewState { loading, signedOut, signedIn, error }
+/// Auth UI state.
+///
+/// [awaitingProfile]: local Supabase session exists; GET /me not yet authorized.
+/// Safe chrome may render; protected data must not.
+enum AuthViewState { loading, awaitingProfile, signedIn, signedOut, error }
 
 class AuthController extends ChangeNotifier {
   AuthController({
@@ -34,6 +38,17 @@ class AuthController extends ChangeNotifier {
   String? errorMessage;
   bool busy = false;
 
+  /// True when Supabase still holds a session (not an authorization grant).
+  bool get hasLocalSession => _auth.currentSession != null;
+
+  /// Driver role + driver id confirmed via GET /me.
+  bool get isDriverAuthorized =>
+      state == AuthViewState.signedIn &&
+      me != null &&
+      me!.isDriver &&
+      me!.driver != null &&
+      me!.driver!.id.isNotEmpty;
+
   Future<void> bootstrap() async {
     state = AuthViewState.loading;
     notifyListeners();
@@ -57,6 +72,12 @@ class AuthController extends ChangeNotifier {
       return;
     }
 
+    await StartupTiming.mark('LOCAL_SESSION_KNOWN');
+    state = AuthViewState.awaitingProfile;
+    errorMessage = null;
+    StartupTiming.markSync('SAFE_SHELL_VISIBLE', once: true);
+    notifyListeners();
+
     await refreshMe();
   }
 
@@ -73,6 +94,15 @@ class AuthController extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      if (profile.driver == null || profile.driver!.id.isEmpty) {
+        await _auth.signOut();
+        me = null;
+        state = AuthViewState.signedOut;
+        errorMessage = 'Driver profile required';
+        await StartupTiming.mark('PROFILE_READY');
+        notifyListeners();
+        return;
+      }
       me = profile;
       state = AuthViewState.signedIn;
       errorMessage = null;
@@ -82,9 +112,11 @@ class AuthController extends ChangeNotifier {
         await handleUnauthorized();
         return;
       }
+      me = null;
       state = AuthViewState.error;
       errorMessage = e.message;
     } catch (_) {
+      me = null;
       state = AuthViewState.error;
       errorMessage = 'Failed to load profile';
     }
@@ -102,6 +134,9 @@ class AuthController extends ChangeNotifier {
         errorMessage = 'Sign-in did not return a session';
         state = AuthViewState.signedOut;
       } else {
+        state = AuthViewState.awaitingProfile;
+        me = null;
+        notifyListeners();
         await refreshMe();
       }
     } on AuthException catch (e) {
@@ -136,6 +171,9 @@ class AuthController extends ChangeNotifier {
             'Account created. Confirm email if required, then sign in.';
         state = AuthViewState.signedOut;
       } else {
+        state = AuthViewState.awaitingProfile;
+        me = null;
+        notifyListeners();
         await refreshMe();
       }
     } on AuthException catch (e) {
