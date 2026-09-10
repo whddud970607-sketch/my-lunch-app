@@ -108,6 +108,7 @@ void main() {
     final map =
         File('lib/screens/map_spike_screen.dart').readAsStringSync();
     expect(map.contains('KakaoInAppNavi'), isTrue);
+    expect(map.contains('TmapInAppNavi'), isTrue);
     expect(map.contains('_navigateToPoint'), isTrue);
     expect(map.contains('onNavigate:'), isTrue);
     expect(map.contains('TmapNaviPocBridge'), isFalse);
@@ -115,10 +116,22 @@ void main() {
     expect(map.contains('kakaonavi://'), isFalse);
   });
 
+  test('TMAP_IN_APP_NAV_WIRING uses product adapter not external deep link', () {
+    final map =
+        File('lib/screens/map_spike_screen.dart').readAsStringSync();
+    expect(map.contains('TmapInAppNavi.open'), isTrue);
+    expect(map.contains('MapProviderId.tmap'), isTrue);
+    // Product path must not call PointExternalNavi for tmap branch as primary.
+    expect(map.contains('setCameraFollowSuppressed(true)'), isTrue);
+    expect(map.contains('_tmapInAppNaviActive'), isTrue);
+    expect(map.contains('disableFollow()'), isTrue); // session end only
+  });
+
   test('DELIVERY_LIST_NAVIGATE uses Kakao in-app nav', () {
     final list =
         File('lib/screens/delivery_list_screen.dart').readAsStringSync();
     expect(list.contains('KakaoInAppNavi'), isTrue);
+    expect(list.contains('TmapInAppNavi'), isTrue);
     expect(list.contains('NaviApi'), isFalse);
     expect(list.contains('kakaonavi://'), isFalse);
   });

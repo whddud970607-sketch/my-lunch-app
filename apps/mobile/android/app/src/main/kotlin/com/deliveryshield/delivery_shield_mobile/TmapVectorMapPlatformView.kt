@@ -10,9 +10,11 @@ import android.view.View
 import android.widget.FrameLayout
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import com.skt.tmap.TMapData
 import com.skt.tmap.TMapPoint
 import com.skt.tmap.TMapView
 import com.skt.tmap.overlay.TMapMarkerItem
+import com.skt.tmap.overlay.TMapPolyLine
 import com.skt.tmap.poi.TMapPOIItem
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -20,6 +22,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
 import java.util.ArrayList
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * TMAP Vector Map PlatformView for Delivery Shield map tab.
@@ -57,6 +60,11 @@ class TmapVectorMapPlatformView(
     private var pendingDriver: Map<String, Any?>? = null
     private var pendingRemoveDriver = false
     private var pendingCamera: Map<String, Any?>? = null
+    /** Latest-wins generation for async [TMapData.findPathDataWithType] callbacks. */
+    private val routeGeneration = AtomicInteger(0)
+    private var pendingRoutePolylinePoints: List<Map<String, Any?>>? = null
+    private var pendingCarRoutePreview: Map<String, Any?>? = null
+    private var routePolylinePresent = false
 
     private val initialLat: Double =
         (creationParams?.get("latitude") as? Number)?.toDouble() ?: 37.5665
@@ -159,6 +167,9 @@ class TmapVectorMapPlatformView(
     override fun dispose() {
         if (disposed) return
         disposed = true
+        routeGeneration.incrementAndGet()
+        pendingRoutePolylinePoints = null
+        pendingCarRoutePreview = null
         Log.i(tag, "state=DISPOSED")
         (activity as? LifecycleOwner)?.lifecycle?.removeObserver(this)
         channel.setMethodCallHandler(null)
@@ -176,6 +187,7 @@ class TmapVectorMapPlatformView(
             Log.w(tag, "onDestroy during dispose", t)
         }
         deliveryMarkerIds.clear()
+        routePolylinePresent = false
         container.removeAllViews()
     }
 
@@ -331,6 +343,54 @@ class TmapVectorMapPlatformView(
                     result.success(null)
                 }
             }
+            "setRoutePolyline" -> {
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as? Map<String, Any?>
+                val points = parseRoutePoints(args?.get("points"))
+                routeGeneration.incrementAndGet()
+                pendingCarRoutePreview = null
+                if (!mapReadyEmitted) {
+                    pendingRoutePolylinePoints = points
+                    result.success(null)
+                    return
+                }
+                runOnUi {
+                    applyRoutePolylinePoints(points)
+                    result.success(null)
+                }
+            }
+            "clearRoutePolyline" -> {
+                routeGeneration.incrementAndGet()
+                pendingRoutePolylinePoints = null
+                pendingCarRoutePreview = null
+                if (!mapReadyEmitted) {
+                    result.success(null)
+                    return
+                }
+                runOnUi {
+                    clearRouteInternal()
+                    result.success(null)
+                }
+            }
+            "requestCarRoutePreview" -> {
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as? Map<String, Any?>
+                if (args == null) {
+                    result.success(mapOf("ok" to false, "reason" to "invalid_args"))
+                    return
+                }
+                val gen = routeGeneration.incrementAndGet()
+                pendingRoutePolylinePoints = null
+                if (!mapReadyEmitted) {
+                    pendingCarRoutePreview = args
+                    result.success(mapOf("ok" to true, "queued" to true))
+                    return
+                }
+                runOnUi {
+                    requestCarRoutePreviewInternal(args, gen)
+                    result.success(mapOf("ok" to true, "queued" to false))
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -420,6 +480,15 @@ class TmapVectorMapPlatformView(
         pendingSelectedId = null
         pendingCamera?.let { moveCameraInternal(it) }
         pendingCamera = null
+        val queuedPoints = pendingRoutePolylinePoints
+        pendingRoutePolylinePoints = null
+        val queuedPreview = pendingCarRoutePreview
+        pendingCarRoutePreview = null
+        if (queuedPoints != null) {
+            applyRoutePolylinePoints(queuedPoints)
+        } else if (queuedPreview != null) {
+            requestCarRoutePreviewInternal(queuedPreview, routeGeneration.get())
+        }
     }
 
     private fun syncPinsInternal(pins: List<Map<String, Any?>>) {
@@ -589,6 +658,157 @@ class TmapVectorMapPlatformView(
         }
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun parseRoutePoints(raw: Any?): List<Map<String, Any?>> {
+        val list = raw as? List<*> ?: return emptyList()
+        val out = ArrayList<Map<String, Any?>>(list.size)
+        for (item in list) {
+            val map = item as? Map<*, *> ?: continue
+            val lat = (map["latitude"] as? Number)?.toDouble()
+            val lng = (map["longitude"] as? Number)?.toDouble()
+            if (lat == null || lng == null || !isValidCoord(lat, lng)) continue
+            out.add(mapOf("latitude" to lat, "longitude" to lng))
+        }
+        return out
+    }
+
+    private fun requestCarRoutePreviewInternal(args: Map<String, Any?>, generation: Int) {
+        if (disposed) return
+        val startLat = (args["startLatitude"] as? Number)?.toDouble()
+        val startLng = (args["startLongitude"] as? Number)?.toDouble()
+        val destLat = (args["destLatitude"] as? Number)?.toDouble()
+        val destLng = (args["destLongitude"] as? Number)?.toDouble()
+        if (startLat == null || startLng == null || destLat == null || destLng == null ||
+            !isValidCoord(startLat, startLng) || !isValidCoord(destLat, destLng)
+        ) {
+            Log.w(tag, "route=INVALID_COORDS")
+            clearRouteInternal()
+            emit(
+                "onRoutePreviewResult",
+                mapOf("ok" to false, "reason" to "invalid_coords"),
+            )
+            return
+        }
+        // Do not draw stale geometry while a newer request is in flight.
+        clearRouteInternal()
+        Log.i(tag, "route=REQUESTED gen=$generation")
+        try {
+            val start = TMapPoint(startLat, startLng)
+            val end = TMapPoint(destLat, destLng)
+            val data = TMapData()
+            data.findPathDataWithType(
+                TMapData.TMapPathType.CAR_PATH,
+                start,
+                end,
+                object : TMapData.OnFindPathDataWithTypeListener {
+                    override fun onFindPathDataWithType(polyLine: TMapPolyLine?) {
+                        if (disposed || generation != routeGeneration.get()) {
+                            Log.i(tag, "route=STALE_IGNORED gen=$generation")
+                            return
+                        }
+                        activity.runOnUiThread {
+                            if (disposed || generation != routeGeneration.get()) {
+                                Log.i(tag, "route=STALE_IGNORED_UI gen=$generation")
+                                return@runOnUiThread
+                            }
+                            val points = polyLine?.linePointList
+                            if (polyLine == null || points == null || points.size < 2) {
+                                Log.w(tag, "route=EMPTY_OR_NULL gen=$generation")
+                                clearRouteInternal()
+                                emit(
+                                    "onRoutePreviewResult",
+                                    mapOf("ok" to false, "reason" to "empty_geometry"),
+                                )
+                                return@runOnUiThread
+                            }
+                            try {
+                                applyNativePolyLine(polyLine)
+                                Log.i(
+                                    tag,
+                                    "route=SUCCESS gen=$generation points=${points.size}",
+                                )
+                                emit(
+                                    "onRoutePreviewResult",
+                                    mapOf(
+                                        "ok" to true,
+                                        "pointCount" to points.size,
+                                        "distance" to polyLine.distance,
+                                    ),
+                                )
+                            } catch (t: Throwable) {
+                                Log.e(tag, "route=APPLY_FAILED gen=$generation", t)
+                                clearRouteInternal()
+                                emit(
+                                    "onRoutePreviewResult",
+                                    mapOf(
+                                        "ok" to false,
+                                        "reason" to t.javaClass.simpleName,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        } catch (t: Throwable) {
+            Log.e(tag, "route=REQUEST_FAILED gen=$generation", t)
+            clearRouteInternal()
+            emit(
+                "onRoutePreviewResult",
+                mapOf("ok" to false, "reason" to t.javaClass.simpleName),
+            )
+        }
+    }
+
+    private fun applyRoutePolylinePoints(points: List<Map<String, Any?>>) {
+        if (disposed) return
+        if (points.size < 2) {
+            clearRouteInternal()
+            return
+        }
+        val linePoints = ArrayList<TMapPoint>(points.size)
+        for (p in points) {
+            val lat = (p["latitude"] as? Number)?.toDouble() ?: continue
+            val lng = (p["longitude"] as? Number)?.toDouble() ?: continue
+            if (!isValidCoord(lat, lng)) continue
+            // Proven ctor order from tmap-sdk-3.7: (latitude, longitude).
+            linePoints.add(TMapPoint(lat, lng))
+        }
+        if (linePoints.size < 2) {
+            clearRouteInternal()
+            return
+        }
+        val poly = TMapPolyLine(ROUTE_POLYLINE_ID, linePoints)
+        applyNativePolyLine(poly)
+    }
+
+    private fun applyNativePolyLine(polyLine: TMapPolyLine) {
+        if (disposed) return
+        clearRouteInternal()
+        polyLine.setID(ROUTE_POLYLINE_ID)
+        if (polyLine.lineWidth <= 0f) {
+            polyLine.setLineWidth(8f)
+        }
+        // Keep Delivery Shield layers (pins / driver) above route by default priority.
+        mapView.addTMapPolyLine(polyLine)
+        routePolylinePresent = true
+    }
+
+    private fun clearRouteInternal() {
+        if (disposed) return
+        try {
+            mapView.removeTMapPolyLine(ROUTE_POLYLINE_ID)
+        } catch (t: Throwable) {
+            Log.w(tag, "removeTMapPolyLine failed", t)
+        }
+        try {
+            mapView.removeTMapPath()
+        } catch (t: Throwable) {
+            Log.w(tag, "removeTMapPath failed", t)
+        }
+        routePolylinePresent = false
+    }
+
     private fun resumeMap() {
         if (disposed || resumed) return
         try {
@@ -678,5 +898,6 @@ class TmapVectorMapPlatformView(
 
     companion object {
         const val DRIVER_MARKER_ID = "driver-location"
+        const val ROUTE_POLYLINE_ID = "ds-route-polyline"
     }
 }

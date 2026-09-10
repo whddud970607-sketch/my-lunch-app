@@ -282,6 +282,14 @@ class _NaverDeliveryMapState extends State<NaverDeliveryMap>
   }
 
   @override
+  Future<void> requestCarRoutePreview({
+    required DeliveryLatLng start,
+    required DeliveryLatLng destination,
+  }) async {
+    // NAVER map adapter does not request TMAP Vector path geometry.
+  }
+
+  @override
   Future<void> setSessionEndpoints({
     DeliveryLatLng? start,
     DeliveryLatLng? end,

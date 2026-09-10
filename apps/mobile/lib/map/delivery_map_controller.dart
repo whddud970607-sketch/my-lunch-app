@@ -43,6 +43,15 @@ abstract class DeliveryMapController {
 
   Future<void> clearRoutePolyline();
 
+  /// Provider-native car route preview when supported.
+  ///
+  /// TMAP Vector uses [TMapData.findPathDataWithType] + [TMapPolyLine].
+  /// Kakao / NAVER remain no-ops. Must not disable Follow or recreate the map.
+  Future<void> requestCarRoutePreview({
+    required DeliveryLatLng start,
+    required DeliveryLatLng destination,
+  });
+
   /// Session start/end markers (distinct from delivery pins / driver marker).
   Future<void> setSessionEndpoints({
     DeliveryLatLng? start,

@@ -211,6 +211,12 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
         // Follow must NOT turn OFF on gesture (locked product policy).
         _onUserGesture?.call();
         break;
+      case 'onRoutePreviewResult':
+        // Flutter keeps selection/Follow; native owns geometry. Log only.
+        if (kDebugMode) {
+          debugPrint('tmap-map routePreviewResult args=${call.arguments}');
+        }
+        break;
     }
   }
 
@@ -471,11 +477,51 @@ class _TmapDeliveryMapState extends State<TmapDeliveryMap>
 
   @override
   Future<void> setRoutePolyline(List<DeliveryLatLng> points) async {
-    // MP-C3: not implemented (deferred).
+    final valid = <Map<String, double>>[];
+    for (final p in points) {
+      if (!_isValidCoord(p.latitude, p.longitude)) continue;
+      valid.add({'latitude': p.latitude, 'longitude': p.longitude});
+    }
+    if (valid.length < 2) {
+      await clearRoutePolyline();
+      return;
+    }
+    await _invoke('setRoutePolyline', {'points': valid});
   }
 
   @override
-  Future<void> clearRoutePolyline() async {}
+  Future<void> clearRoutePolyline() async {
+    await _invoke('clearRoutePolyline');
+  }
+
+  @override
+  Future<void> requestCarRoutePreview({
+    required DeliveryLatLng start,
+    required DeliveryLatLng destination,
+  }) async {
+    if (!_isValidCoord(start.latitude, start.longitude) ||
+        !_isValidCoord(destination.latitude, destination.longitude)) {
+      await clearRoutePolyline();
+      return;
+    }
+    await _invoke('requestCarRoutePreview', {
+      'startLatitude': start.latitude,
+      'startLongitude': start.longitude,
+      'destLatitude': destination.latitude,
+      'destLongitude': destination.longitude,
+    });
+  }
+
+  bool _isValidCoord(double lat, double lng) {
+    return lat.isFinite &&
+        lng.isFinite &&
+        lat != 0.0 &&
+        lng != 0.0 &&
+        lat >= -90.0 &&
+        lat <= 90.0 &&
+        lng >= -180.0 &&
+        lng <= 180.0;
+  }
 
   @override
   Future<void> setSessionEndpoints({

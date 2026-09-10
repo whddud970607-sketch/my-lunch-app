@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../copy/driver_chrome_copy.dart';
 import '../map/today_workset_map_adapter.dart';
+import '../map/map_provider_id.dart';
+import '../map/map_provider_settings.dart';
 import '../map/workset_map_filter.dart';
 import '../models/map_spike_point.dart';
 import '../models/today_workset.dart';
 import '../navigation/kakao_in_app_navi.dart';
 import '../navigation/point_external_navi.dart';
+import '../navigation/tmap_in_app_navi.dart';
 import '../services/api_exception.dart';
 import '../services/map_spike_service.dart';
 import '../services/today_workset_repository.dart';
@@ -211,6 +214,34 @@ class _DeliveryListScreenState extends State<DeliveryListScreen> {
 
   Future<void> _navigateToPoint(MapSpikePoint point) async {
     if (!PointExternalNavi.hasValidDestination(point)) return;
+    final provider = await MapProviderSettings.load();
+    if (!mounted) return;
+
+    if (provider == MapProviderId.tmap) {
+      final ok = await TmapInAppNavi.open(destination: point);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('티맵 길찾기를 열 수 없습니다')),
+        );
+      }
+      return;
+    }
+
+    if (provider == MapProviderId.naver) {
+      final ok = await PointExternalNavi.open(
+        latitude: point.latitude,
+        longitude: point.longitude,
+        name: PointExternalNavi.labelFor(point),
+        preferredProvider: MapProviderId.naver,
+      );
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('길찾기를 열 수 없습니다')),
+        );
+      }
+      return;
+    }
+
     final workset = _workset;
     final driverId = widget.controller.me?.driver?.id ?? '';
     final worksetPoints = workset == null

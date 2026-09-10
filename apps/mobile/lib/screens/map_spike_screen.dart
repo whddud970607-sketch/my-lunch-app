@@ -20,6 +20,7 @@ import '../models/map_spike_point.dart';
 import '../models/today_workset.dart';
 import '../navigation/kakao_in_app_navi.dart';
 import '../navigation/point_external_navi.dart';
+import '../navigation/tmap_in_app_navi.dart';
 import '../services/api_client.dart';
 import '../services/api_exception.dart';
 import '../services/map_spike_service.dart';
@@ -120,6 +121,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
   bool _tickerOn = true;
   bool _nativeReady = false;
   int _nativeReadyRetries = 0;
+  /// True while TMAP in-app Navi Activity is expected to be on top.
+  bool _tmapInAppNaviActive = false;
   Timer? _nativeReadyTimeout;
 
   TodayWorkset? _workset;
@@ -280,6 +283,11 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
         // PlatformViews often blank after background; remount host.
         if (_tickerOn) {
           _recreateNativeMap('app_resume');
+        }
+        if (_tmapInAppNaviActive) {
+          // Returned from TMAP in-app Navi — restore map camera ownership.
+          _tmapInAppNaviActive = false;
+          _locationCoordinator.setCameraFollowSuppressed(false);
         }
         _locationCoordinator.loadVehicleType().then((_) {
           // Resume GPS; Follow state is preserved across pause.
@@ -525,7 +533,10 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     _locationCoordinator.attachMap(controller);
     unawaited(_syncPinsToMap());
     final focusId = widget.focusPointId ?? _pendingFocusPointId;
-    if (focusId == null || focusId.isEmpty) return;
+    if (focusId == null || focusId.isEmpty) {
+      unawaited(_refreshTmapRoutePreviewForSelection());
+      return;
+    }
     _applyFocusPoint(focusId);
   }
 
@@ -580,6 +591,8 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (_effectiveSource == DeliveryMapDataSource.today) {
       unawaited(_hydratePointDetail(point.pointId));
     }
+    // MP-N2: TMAP Vector route preview — does not disable Follow.
+    unawaited(_requestTmapRoutePreview(point));
   }
 
   /// Lazy PII load for the tapped point only (no bulk N+1 on map open).
@@ -626,6 +639,63 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
     if (_detailOpen) {
       setState(() => _detailOpen = false);
     }
+    unawaited(_clearTmapRoutePreview());
+  }
+
+  Future<void> _clearTmapRoutePreview() async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      await controller.clearRoutePolyline();
+    } catch (_) {}
+  }
+
+  Future<void> _refreshTmapRoutePreviewForSelection() async {
+    final pointId = _selectedPointId.value;
+    if (pointId == null) {
+      await _clearTmapRoutePreview();
+      return;
+    }
+    final point = _pointsById[pointId];
+    if (point == null) {
+      await _clearTmapRoutePreview();
+      return;
+    }
+    await _requestTmapRoutePreview(point);
+  }
+
+  Future<void> _requestTmapRoutePreview(MapSpikePoint point) async {
+    final controller = _mapController;
+    if (controller == null) return;
+    if (_mapProviderId != MapProviderId.tmap) {
+      await _clearTmapRoutePreview();
+      return;
+    }
+    if (!PointExternalNavi.hasValidDestination(point)) {
+      await _clearTmapRoutePreview();
+      return;
+    }
+    final snap = _locationCoordinator.locationService.lastSnapshot;
+    if (snap == null ||
+        !PointExternalNavi.isValidCoordinate(snap.latitude, snap.longitude)) {
+      // No valid GPS — fail safely; never disable Follow or invent a start.
+      await _clearTmapRoutePreview();
+      return;
+    }
+    try {
+      await controller.requestCarRoutePreview(
+        start: DeliveryLatLng(
+          latitude: snap.latitude,
+          longitude: snap.longitude,
+        ),
+        destination: DeliveryLatLng(
+          latitude: point.latitude,
+          longitude: point.longitude,
+        ),
+      );
+    } catch (_) {
+      // Native path failure must not crash map / clear selection.
+    }
   }
 
   Future<void> _navigateToPoint(MapSpikePoint point) async {
@@ -647,6 +717,23 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
       if (!ok && mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('길찾기를 열 수 없습니다')));
+      }
+      return;
+    }
+
+    if (_mapProviderId == MapProviderId.tmap) {
+      // In-app NavigationFragment — not external tmap://. Follow stays ON.
+      _locationCoordinator.setCameraFollowSuppressed(true);
+      _tmapInAppNaviActive = true;
+      final ok = await TmapInAppNavi.open(destination: point);
+      if (!ok) {
+        _tmapInAppNaviActive = false;
+        _locationCoordinator.setCameraFollowSuppressed(false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('티맵 길찾기를 열 수 없습니다')),
+          );
+        }
       }
       return;
     }
@@ -844,6 +931,14 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
 
   Future<void> _changeMapProvider(MapProviderId id) async {
     if (id == _mapProviderId) return;
+    if (_tmapInAppNaviActive) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('내비게이션 중에는 지도를 변경할 수 없습니다')),
+        );
+      }
+      return;
+    }
     await MapProviderSettings.save(id);
     if (!mounted) return;
     _locationCoordinator.detachMap();
@@ -1057,6 +1152,7 @@ class _MapSpikeScreenState extends State<MapSpikeScreen>
                               onSelectClusterPoint: pin.isCluster
                                   ? (p) {
                                       _selectedPointId.value = p.pointId;
+                                      unawaited(_requestTmapRoutePreview(p));
                                       if (_effectiveSource ==
                                           DeliveryMapDataSource.today) {
                                         unawaited(

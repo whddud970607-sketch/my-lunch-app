@@ -48,7 +48,10 @@ class TmapNaviPocActivity : AppCompatActivity() {
         const val EXTRA_DEST_LAT = "extra_tmap_dest_lat"
         const val EXTRA_DEST_LNG = "extra_tmap_dest_lng"
         const val EXTRA_DEST_NAME = "extra_tmap_dest_name"
-        private const val TAG = "TmapNaviPoc"
+        /** When true: product path — real dest required; no fixture fallback. */
+        const val EXTRA_PRODUCT_MODE = "extra_tmap_product_mode"
+        const val EXTRA_POINT_ID = "extra_tmap_point_id"
+        private const val TAG = "TmapNavi"
         private const val PERMISSION_REQUEST_CODE = 9201
     }
 
@@ -63,6 +66,8 @@ class TmapNaviPocActivity : AppCompatActivity() {
     private var destLat: Double? = null
     private var destLng: Double? = null
     private var destName: String = ""
+    private var productMode: Boolean = false
+    private var pointId: String = ""
     private var initStarted = false
     private var routeRequested = false
     private var exiting = false
@@ -70,11 +75,14 @@ class TmapNaviPocActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_tmap_navi_poc)
+        Log.i(TAG, "NAV_ACTIVITY_CREATED")
 
         clientId = intent.getStringExtra(EXTRA_CLIENT_ID)?.trim().orEmpty()
         apiKey = intent.getStringExtra(EXTRA_API_KEY)?.trim().orEmpty()
         userKey = intent.getStringExtra(EXTRA_USER_KEY)?.trim().orEmpty()
         deviceKey = intent.getStringExtra(EXTRA_DEVICE_KEY)?.trim().orEmpty()
+        productMode = intent.getBooleanExtra(EXTRA_PRODUCT_MODE, false)
+        pointId = intent.getStringExtra(EXTRA_POINT_ID)?.trim().orEmpty()
         if (intent.hasExtra(EXTRA_DEST_LAT) && intent.hasExtra(EXTRA_DEST_LNG)) {
             destLat = intent.getDoubleExtra(EXTRA_DEST_LAT, 0.0)
             destLng = intent.getDoubleExtra(EXTRA_DEST_LNG, 0.0)
@@ -93,13 +101,22 @@ class TmapNaviPocActivity : AppCompatActivity() {
         }
         ViewCompat.requestApplyInsets(chrome)
         findViewById<ImageButton>(R.id.btn_close).setOnClickListener {
-            Log.d(TAG, "close control tapped")
+            Log.i(TAG, "NAV_CANCELLED")
             exitPoc()
         }
 
         if (apiKey.isEmpty()) {
-            setStatus("POC config error: API key missing")
-            toast("TMAP POC configuration error")
+            Log.e(TAG, "NAV_FAILED reason=missing_api_key")
+            setStatus("TMAP config error: API key missing")
+            toast("티맵 길찾기 설정 오류")
+            finish()
+            return
+        }
+
+        if (productMode && !hasValidDestination()) {
+            Log.e(TAG, "NAV_FAILED reason=invalid_destination")
+            setStatus("Invalid destination")
+            toast("배송지 좌표가 없어 길찾기를 열 수 없습니다")
             finish()
             return
         }
@@ -107,6 +124,14 @@ class TmapNaviPocActivity : AppCompatActivity() {
         attachNavigationFragment()
         wireBackPress()
         ensureLocationPermissionThenInit()
+    }
+
+    private fun hasValidDestination(): Boolean {
+        val lat = destLat
+        val lng = destLng
+        return lat != null && lng != null &&
+            lat != 0.0 && lng != 0.0 &&
+            lat.isFinite() && lng.isFinite()
     }
 
     private fun attachNavigationFragment() {
@@ -117,6 +142,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
                 .add(R.id.tmap_ui_container, fragment)
                 .commitAllowingStateLoss()
         }
+        Log.i(TAG, "NAV_FRAGMENT_ATTACHED")
 
         navigationFragment.drivingStatusCallback = object : DrivingStatusCallback {
             override fun onStartNavigationInfo(
@@ -132,10 +158,12 @@ class TmapNaviPocActivity : AppCompatActivity() {
             }
 
             override fun onStartNavigation() {
+                Log.i(TAG, "NAV_STARTED")
                 runOnUiThread { setStatus("Guidance started") }
             }
 
             override fun onStopNavigation() {
+                Log.i(TAG, "NAV_STOPPED")
                 runOnUiThread {
                     setStatus("Guidance stopped")
                     if (exiting && !isFinishing) {
@@ -196,6 +224,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
             }
 
             override fun onFailRouteRequest(errorCode: String, errorMessage: String) {
+                Log.e(TAG, "NAV_FAILED phase=route_callback code=$errorCode")
                 runOnUiThread {
                     setStatus("Route callback fail ($errorCode)")
                 }
@@ -307,7 +336,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
             deviceKey,
             object : InitializeListener {
                 override fun onSuccess() {
-                    Log.d(TAG, "initialize success")
+                    Log.i(TAG, "NAV_SDK_INIT_OK")
                     runOnUiThread {
                         setStatus("SDK initialized — requesting route…")
                         navigationFragment.setSettings(
@@ -321,10 +350,13 @@ class TmapNaviPocActivity : AppCompatActivity() {
                 }
 
                 override fun onFail(errorCode: Int, errorMsg: String?) {
-                    Log.e(TAG, "initialize fail code=$errorCode")
+                    Log.e(TAG, "NAV_FAILED phase=init code=$errorCode")
                     runOnUiThread {
                         setStatus("Init failed ($errorCode)")
-                        toast("TMAP init failed")
+                        toast("티맵 길찾기 초기화 실패")
+                        if (productMode) {
+                            finish()
+                        }
                     }
                 }
 
@@ -362,14 +394,16 @@ class TmapNaviPocActivity : AppCompatActivity() {
             )
             val destLatitude = destLat
             val destLongitude = destLng
-            val endPoint = if (destLatitude != null && destLongitude != null &&
-                destLatitude != 0.0 && destLongitude != 0.0
+            val endPoint = if (hasValidDestination() &&
+                destLatitude != null &&
+                destLongitude != null
             ) {
+                // MapPoint(lon, lat) — TMAP engine order.
                 WayPoint(
                     destName.ifEmpty { "배송지" },
                     MapPoint(destLongitude, destLatitude),
                 )
-            } else {
+            } else if (!productMode) {
                 WayPoint(
                     TmapNaviPocFixture.DESTINATION_LABEL,
                     MapPoint(
@@ -377,6 +411,13 @@ class TmapNaviPocActivity : AppCompatActivity() {
                         TmapNaviPocFixture.DESTINATION_LATITUDE,
                     ),
                 )
+            } else {
+                Log.e(TAG, "NAV_FAILED reason=missing_destination_at_route")
+                runOnUiThread {
+                    toast("배송지 좌표가 없어 길찾기를 열 수 없습니다")
+                    finish()
+                }
+                return@requestCurrentLocation
             }
             val planTypes = arrayListOf(
                 RoutePlanType.Traffic_Recommend,
@@ -384,6 +425,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
             )
 
             runOnUiThread {
+                Log.i(TAG, "ROUTE_REQUESTED")
                 navigationFragment.requestRoute(
                     startPoint,
                     null,
@@ -391,14 +433,18 @@ class TmapNaviPocActivity : AppCompatActivity() {
                     true,
                     object : RouteRequestListener {
                         override fun onSuccess() {
-                            Log.d(TAG, "requestRoute success")
+                            Log.i(TAG, "ROUTE_SUCCESS")
                             setStatus("Route OK — guidance UI")
                         }
 
                         override fun onFail(errorCode: Int, errorMsg: String?) {
-                            Log.e(TAG, "requestRoute fail code=$errorCode")
+                            Log.e(TAG, "NAV_FAILED phase=route_request code=$errorCode")
                             setStatus("Route failed ($errorCode)")
-                            toast("TMAP route request failed")
+                            toast("티맵 경로 요청 실패")
+                            if (productMode) {
+                                // Fail-safe: return to Delivery Shield map.
+                                finish()
+                            }
                         }
                     },
                     planTypes,
@@ -415,7 +461,7 @@ class TmapNaviPocActivity : AppCompatActivity() {
             return
         }
         exiting = true
-        Log.d(TAG, "exitPoc")
+        Log.i(TAG, "NAV_ACTIVITY_FINISHED")
         stopDriveQuietly()
         if (::fragmentManager.isInitialized && ::navigationFragment.isInitialized) {
             try {

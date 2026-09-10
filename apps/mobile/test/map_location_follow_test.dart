@@ -58,6 +58,12 @@ class _FakeMapController implements DeliveryMapController {
   Future<void> clearRoutePolyline() async {}
 
   @override
+  Future<void> requestCarRoutePreview({
+    required DeliveryLatLng start,
+    required DeliveryLatLng destination,
+  }) async {}
+
+  @override
   Future<void> setSessionEndpoints({
     DeliveryLatLng? start,
     DeliveryLatLng? end,

@@ -110,5 +110,63 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "delivery_shield/tmap_in_app_navi",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startNavigation" -> {
+                    val apiKey = call.argument<String>("apiKey")?.trim()
+                    if (apiKey.isNullOrEmpty()) {
+                        result.error("missing_key", "TMAP API key required", null)
+                        return@setMethodCallHandler
+                    }
+                    val latitude = call.argument<Number>("latitude")?.toDouble()
+                    val longitude = call.argument<Number>("longitude")?.toDouble()
+                    if (latitude == null ||
+                        longitude == null ||
+                        latitude == 0.0 ||
+                        longitude == 0.0 ||
+                        !latitude.isFinite() ||
+                        !longitude.isFinite()
+                    ) {
+                        result.error(
+                            "invalid_destination",
+                            "Valid destination latitude/longitude required",
+                            null,
+                        )
+                        return@setMethodCallHandler
+                    }
+                    val intent = Intent(this, TmapNaviPocActivity::class.java)
+                    intent.putExtra(TmapNaviPocActivity.EXTRA_PRODUCT_MODE, true)
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_CLIENT_ID,
+                        call.argument<String>("clientId")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(TmapNaviPocActivity.EXTRA_API_KEY, apiKey)
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_USER_KEY,
+                        call.argument<String>("userKey")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_DEVICE_KEY,
+                        call.argument<String>("deviceKey")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_POINT_ID,
+                        call.argument<String>("pointId")?.trim().orEmpty(),
+                    )
+                    intent.putExtra(TmapNaviPocActivity.EXTRA_DEST_LAT, latitude)
+                    intent.putExtra(TmapNaviPocActivity.EXTRA_DEST_LNG, longitude)
+                    intent.putExtra(
+                        TmapNaviPocActivity.EXTRA_DEST_NAME,
+                        call.argument<String>("destinationName")?.trim().orEmpty(),
+                    )
+                    startActivity(intent)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 }

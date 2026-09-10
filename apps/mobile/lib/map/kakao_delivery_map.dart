@@ -474,6 +474,14 @@ class _KakaoDeliveryMapState extends State<KakaoDeliveryMap>
   }
 
   @override
+  Future<void> requestCarRoutePreview({
+    required DeliveryLatLng start,
+    required DeliveryLatLng destination,
+  }) async {
+    // Kakao Maps spike has no native car-path geometry API in this app path.
+  }
+
+  @override
   Future<void> setSessionEndpoints({
     DeliveryLatLng? start,
     DeliveryLatLng? end,
