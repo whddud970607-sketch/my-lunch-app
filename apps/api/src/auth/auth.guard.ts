@@ -8,7 +8,8 @@ import {
 import { AUTH_VERIFIER, type AuthVerifier } from "./auth-verifier";
 import { SupabaseUserClientFactory } from "../supabase/supabase-user.client";
 import { ProfilesService } from "../profiles/profiles.service";
-import type { AuthUser } from "./auth.types";
+import type { AuthUser, DriverRow, ProfileRow } from "./auth.types";
+import { MePerfTiming } from "../me/me-perf-timing";
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -22,8 +23,19 @@ export class AuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<{
       headers: { authorization?: string };
       authUser?: AuthUser;
+      authProfile?: ProfileRow;
+      authDriver?: DriverRow | null;
       supabaseUser?: ReturnType<SupabaseUserClientFactory["createForAccessToken"]>;
+      mePerf?: MePerfTiming;
     }>();
+
+    const isMe = context.getClass().name === "MeController";
+    const perf = isMe ? new MePerfTiming() : undefined;
+    if (perf) {
+      req.mePerf = perf;
+      perf.mark("ME_SERVER_START");
+      perf.mark("ME_AUTH_GUARD_START");
+    }
 
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) {
@@ -41,17 +53,23 @@ export class AuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException("Invalid or expired token");
     }
+    if (perf) perf.mark("ME_JWT_VERIFY_DONE");
 
     const supabaseUser = this.userClients.createForAccessToken(accessToken);
-    const authUser = await this.profiles.resolveAuthUser(
+    const resolved = await this.profiles.resolveAuthUser(
       supabaseUser,
       verified.userId,
       accessToken,
       verified.email,
+      perf,
     );
 
-    req.authUser = authUser;
+    req.authUser = resolved.user;
+    req.authProfile = resolved.profile;
+    req.authDriver = resolved.driver;
     req.supabaseUser = supabaseUser;
+
+    if (perf) perf.mark("ME_AUTH_GUARD_END");
     return true;
   }
 }

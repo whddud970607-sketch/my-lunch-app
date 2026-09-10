@@ -53,10 +53,6 @@ class AuthController extends ChangeNotifier {
     state = AuthViewState.loading;
     notifyListeners();
 
-    // Prepare permission modules only — no OS prompts in Phase 1D.
-    await permissions.prepare(AppPermission.camera);
-    await permissions.prepare(AppPermission.location);
-
     _auth.authStateChanges.listen((data) {
       final event = data.event;
       if (event == AuthChangeEvent.signedOut) {
@@ -72,11 +68,16 @@ class AuthController extends ChangeNotifier {
       return;
     }
 
-    await StartupTiming.mark('LOCAL_SESSION_KNOWN');
+    // PERF-S4: sync marks — MethodChannel await must not delay safe shell.
+    StartupTiming.markSync('LOCAL_SESSION_KNOWN', once: true);
     state = AuthViewState.awaitingProfile;
     errorMessage = null;
     StartupTiming.markSync('SAFE_SHELL_VISIBLE', once: true);
     notifyListeners();
+
+    // Permission module prep is not required for shell chrome (no OS prompts).
+    await permissions.prepare(AppPermission.camera);
+    await permissions.prepare(AppPermission.location);
 
     await refreshMe();
   }
@@ -108,6 +109,7 @@ class AuthController extends ChangeNotifier {
       errorMessage = null;
     } on ApiException catch (e) {
       if (e.unauthorized) {
+        await StartupTiming.mark('ME_CONTROLLER_READY');
         await StartupTiming.mark('PROFILE_READY');
         await handleUnauthorized();
         return;
@@ -120,6 +122,7 @@ class AuthController extends ChangeNotifier {
       state = AuthViewState.error;
       errorMessage = 'Failed to load profile';
     }
+    await StartupTiming.mark('ME_CONTROLLER_READY');
     await StartupTiming.mark('PROFILE_READY');
     notifyListeners();
   }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../debug/startup_timing.dart';
 import 'api_exception.dart';
 
 typedef AccessTokenProvider = Future<String?> Function();
@@ -28,18 +29,45 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> getJson(String path) async {
+    final tokenSw = Stopwatch()..start();
     final token = await tokenProvider();
+    final tokenMs = tokenSw.elapsedMilliseconds;
+    if (path == '/me') {
+      StartupTiming.markDuration('ME_CLIENT_TOKEN_MS', tokenMs);
+    }
     if (token == null || token.isEmpty) {
       throw ApiException(message: 'Not signed in', unauthorized: true);
     }
 
-    final response = await _http.get(
-      _uri(path),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      },
-    );
+    final httpSw = Stopwatch()..start();
+    late final http.Response response;
+    try {
+      response = await _http.get(
+        _uri(path),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+    } catch (_) {
+      if (path == '/me') {
+        StartupTiming.markDuration(
+          'ME_CLIENT_HTTP_ROUNDTRIP_MS',
+          httpSw.elapsedMilliseconds,
+        );
+        StartupTiming.markDuration('ME_CLIENT_HTTP_ERROR', 1);
+        // package:http does not expose DNS/TLS/TTFB without a custom client.
+      }
+      rethrow;
+    }
+    if (path == '/me') {
+      StartupTiming.markDuration(
+        'ME_CLIENT_HTTP_ROUNDTRIP_MS',
+        httpSw.elapsedMilliseconds,
+      );
+      StartupTiming.markDuration('ME_CLIENT_HTTP_STATUS', response.statusCode);
+      // package:http does not expose DNS/TLS/TTFB without a custom client.
+    }
 
     return _decode(response);
   }

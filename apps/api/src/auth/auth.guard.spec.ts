@@ -12,6 +12,12 @@ describe("AuthGuard", () => {
     profiles as never,
   );
 
+  beforeEach(() => {
+    jwt.verifyAccessToken.mockReset();
+    userClients.createForAccessToken.mockReset();
+    profiles.resolveAuthUser.mockReset();
+  });
+
   const ctx = (authorization?: string) =>
     ({
       switchToHttp: () => ({
@@ -19,6 +25,7 @@ describe("AuthGuard", () => {
           headers: { authorization },
         }),
       }),
+      getClass: () => ({ name: "OtherController" }),
     }) as never;
 
   it("rejects missing bearer token", async () => {
@@ -34,24 +41,42 @@ describe("AuthGuard", () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("accepts valid token and attaches auth user", async () => {
+  it("accepts valid token and attaches auth user + profile/driver rows", async () => {
     jwt.verifyAccessToken.mockResolvedValueOnce({
       userId: "u1",
       email: "d@example.com",
     });
     const fakeClient = { from: jest.fn() };
     userClients.createForAccessToken.mockReturnValueOnce(fakeClient);
-    profiles.resolveAuthUser.mockResolvedValueOnce({
-      userId: "u1",
+    const profile = {
+      id: "u1",
       role: "driver",
-      companyId: null,
-      driverId: "d1",
-      accessToken: "tok",
+      company_id: null,
+      display_name: "Driver",
+    };
+    const driver = {
+      id: "d1",
+      user_id: "u1",
+      company_id: null,
+      work_status: "available",
+    };
+    profiles.resolveAuthUser.mockResolvedValueOnce({
+      user: {
+        userId: "u1",
+        role: "driver",
+        companyId: null,
+        driverId: "d1",
+        accessToken: "tok",
+      },
+      profile,
+      driver,
     });
 
     const request: {
       headers: { authorization: string };
       authUser?: unknown;
+      authProfile?: unknown;
+      authDriver?: unknown;
       supabaseUser?: unknown;
     } = {
       headers: { authorization: "Bearer tok" },
@@ -59,10 +84,13 @@ describe("AuthGuard", () => {
 
     const ok = await guard.canActivate({
       switchToHttp: () => ({ getRequest: () => request }),
+      getClass: () => ({ name: "MeController" }),
     } as never);
 
     expect(ok).toBe(true);
     expect(request.authUser).toMatchObject({ userId: "u1", role: "driver" });
+    expect(request.authProfile).toEqual(profile);
+    expect(request.authDriver).toEqual(driver);
     expect(request.supabaseUser).toBe(fakeClient);
     expect(userClients.createForAccessToken).toHaveBeenCalledWith("tok");
   });

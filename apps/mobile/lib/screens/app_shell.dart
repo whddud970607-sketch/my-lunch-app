@@ -18,7 +18,7 @@ import 'map_spike_screen.dart';
 import 'menu_account_data.dart';
 import 'menu_debug_tools.dart';
 import 'menu_screen.dart';
-import 'profile_pending_body.dart';
+import 'home_pending_skeleton.dart';
 import 'scanner_screen.dart';
 
 /// Authenticated shell: 5-tab bottom nav. Heavy tabs instantiate on first visit.
@@ -92,7 +92,8 @@ class _AppShellState extends State<AppShell> {
   Widget _tabAt(BuildContext context, int index) {
     // PERF-S2: no protected tab bodies until GET /me authorizes driver.
     if (!widget.controller.isDriverAuthorized) {
-      return ProfilePendingBody(
+      // PERF-S4: home-shaped skeleton only — no HomeScreen / workset fetch.
+      return HomePendingSkeleton(
         isError: widget.controller.state == AuthViewState.error,
         message: widget.controller.errorMessage,
         onRetry: () {

@@ -17,13 +17,19 @@ class StartupTiming {
   static int? _lastElapsedRealtimeMs;
   static final Set<String> _once = <String>{};
 
+  /// Starts monotonic clock immediately; hydrates process elapsed off the
+  /// critical path (MethodChannel must not delay AppConfig / runApp).
   static Future<void> markMainStart() async {
     _fromMain
       ..reset()
       ..start();
+    _emit('DART_MAIN_START');
+    unawaited(_hydrateProcessTiming());
+  }
+
+  static Future<void> _hydrateProcessTiming() async {
     _processStartElapsedMs = await _invokeInt('processStartElapsedMs');
     await _refreshElapsedCache();
-    await mark('DART_MAIN_START');
   }
 
   /// Safe from build/initState — never awaits a platform channel before logging.
@@ -74,5 +80,17 @@ class StartupTiming {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Span duration log (no payloads / secrets).
+  static void markDuration(String name, int durationMs, {bool once = false}) {
+    if (once && !_once.add(name)) return;
+    final fromMainMs = _fromMain.isRunning ? _fromMain.elapsedMilliseconds : -1;
+    final wallMs = DateTime.now().millisecondsSinceEpoch;
+    // ignore: avoid_print — release logcat measurement requires print
+    print(
+      '$_tag mark=$name duration_ms=$durationMs from_main_ms=$fromMainMs '
+      'wall_ms=$wallMs',
+    );
   }
 }

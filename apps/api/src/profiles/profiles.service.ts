@@ -6,7 +6,33 @@ import {
 } from "@nestjs/common";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SupabaseServiceClient } from "../supabase/supabase-service.client";
-import type { AuthUser, DriverRow, ProfileRow, UserRole } from "../auth/auth.types";
+import type {
+  AuthUser,
+  DriverRow,
+  ProfileRow,
+  UserRole,
+} from "../auth/auth.types";
+import type { MePerfTiming } from "../me/me-perf-timing";
+
+/** AuthGuard resolution: AuthUser plus rows needed for GET /me (no re-fetch). */
+export type ResolvedAuthContext = {
+  user: AuthUser;
+  profile: ProfileRow;
+  driver: DriverRow | null;
+};
+
+export type MePayload = {
+  userId: string;
+  email: string | null;
+  role: UserRole;
+  companyId: string | null;
+  displayName: string | null;
+  driver: {
+    id: string;
+    companyId: string | null;
+    workStatus: string;
+  } | null;
+};
 
 @Injectable()
 export class ProfilesService {
@@ -19,14 +45,23 @@ export class ProfilesService {
     userId: string,
     accessToken: string,
     email?: string,
-  ): Promise<AuthUser> {
-    let profile = await this.fetchProfile(userClient, userId);
-    let driver = await this.fetchDriver(userClient, userId);
+    perf?: MePerfTiming,
+  ): Promise<ResolvedAuthContext> {
+    let { profile, driver } = await this.fetchProfileAndDriver(
+      userClient,
+      userId,
+      perf,
+    );
 
     if (!profile || !driver) {
+      perf?.mark("ME_BOOTSTRAP_START");
       await this.bootstrapIfMissing(userId, email);
-      profile = await this.fetchProfile(userClient, userId);
-      driver = await this.fetchDriver(userClient, userId);
+      perf?.mark("ME_BOOTSTRAP_END");
+      ({ profile, driver } = await this.fetchProfileAndDriver(
+        userClient,
+        userId,
+        perf,
+      ));
     }
 
     if (!profile) {
@@ -34,23 +69,33 @@ export class ProfilesService {
     }
 
     return {
-      userId,
-      email,
-      role: profile.role,
-      companyId: profile.company_id,
-      driverId: driver?.id ?? null,
-      accessToken,
+      user: {
+        userId,
+        email,
+        role: profile.role,
+        companyId: profile.company_id,
+        driverId: driver?.id ?? null,
+        accessToken,
+      },
+      profile,
+      driver,
     };
   }
 
-  async getMePayload(userClient: SupabaseClient, user: AuthUser) {
-    const profile = await this.fetchProfile(userClient, user.userId);
+  /**
+   * Build GET /me body from AuthGuard-resolved rows — no additional DB reads.
+   */
+  buildMePayload(
+    user: AuthUser,
+    profile: ProfileRow,
+    driver: DriverRow | null,
+    perf?: MePerfTiming,
+  ): MePayload {
+    perf?.mark("ME_PAYLOAD_BUILD_START");
     if (!profile) {
       throw new UnauthorizedException("Profile not found");
     }
-    const driver = await this.fetchDriver(userClient, user.userId);
-
-    return {
+    const payload: MePayload = {
       userId: user.userId,
       email: user.email ?? null,
       role: profile.role,
@@ -64,6 +109,25 @@ export class ProfilesService {
           }
         : null,
     };
+    perf?.mark("ME_PAYLOAD_BUILD_END");
+    return payload;
+  }
+
+  private async fetchProfileAndDriver(
+    userClient: SupabaseClient,
+    userId: string,
+    perf?: MePerfTiming,
+  ): Promise<{ profile: ProfileRow | null; driver: DriverRow | null }> {
+    // Independent lookups on userId — safe to parallelize.
+    perf?.mark("ME_PROFILE_QUERY_START");
+    perf?.mark("ME_DRIVER_QUERY_START");
+    const [profile, driver] = await Promise.all([
+      this.fetchProfile(userClient, userId),
+      this.fetchDriver(userClient, userId),
+    ]);
+    perf?.mark("ME_PROFILE_QUERY_END");
+    perf?.mark("ME_DRIVER_QUERY_END");
+    return { profile, driver };
   }
 
   private async fetchProfile(
